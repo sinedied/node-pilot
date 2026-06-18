@@ -1,0 +1,11 @@
+# TODO (personal scratchpad for human, not for AI agents)
+
+- [ ] rename to cockpit.js
+- [ ] cursor icon bug hover, flashing between regular and pointer icons
+- [ ] move toolbar to "Info" tab, with refresh and theme there. Should be first tab.
+- [ ] no disctinction in pinned script, default pinned scripts can be unpinned too
+
+- [ ] add skills (README for example)
+- [ ] logo
+- [ ] css
+- [ ] dogfood all features
