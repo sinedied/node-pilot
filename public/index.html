@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Node Pilot</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand"><span class="logo">⬡</span> Node&nbsp;Pilot</div>
+      <div id="project" class="project"></div>
+      <button id="refresh" class="icon-btn" title="Re-run project detection">⟳</button>
+    </header>
+
+    <div id="notice" class="notice hidden"></div>
+
+    <nav class="toolbar" id="toolbar">
+      <button class="lane-btn" data-lane="build">Build</button>
+      <button class="lane-btn" data-lane="typecheck">Type-check</button>
+      <button class="lane-btn" data-lane="lint">Lint</button>
+      <button class="lane-btn" data-lane="format">Format</button>
+      <button class="lane-btn primary" id="test-btn">Test</button>
+      <label class="scripts">
+        <span>Scripts</span>
+        <select id="scripts">
+          <option value="">—</option>
+        </select>
+      </label>
+    </nav>
+
+    <div class="tabs" id="tabs">
+      <button data-tab="console" class="active">Console</button>
+      <button data-tab="tests">Tests</button>
+      <button data-tab="dev">Dev</button>
+      <button data-tab="deps">Dependencies</button>
+    </div>
+
+    <main>
+      <!-- Console -->
+      <section id="tab-console" class="tab-panel active">
+        <div class="panel-head">
+          <span id="console-label" class="mono dim">Run a lane to see output here.</span>
+          <span class="grow"></span>
+          <span id="console-status" class="status-chip"></span>
+          <button id="console-fix" class="fix-btn hidden">✦ Fix with Copilot</button>
+        </div>
+        <pre id="console" class="console"></pre>
+      </section>
+
+      <!-- Tests -->
+      <section id="tab-tests" class="tab-panel" hidden>
+        <div id="tests-empty" class="empty">No test run yet. Press <b>Test</b>.</div>
+        <div id="tests-body" class="hidden">
+          <div class="panel-head">
+            <div id="test-chips" class="chips"></div>
+            <span class="grow"></span>
+            <button id="test-fix" class="fix-btn hidden">✦ Fix with Copilot</button>
+            <button id="test-raw-toggle" class="ghost-btn">Raw output</button>
+          </div>
+          <div id="test-suites" class="suites"></div>
+          <pre id="test-raw" class="console hidden"></pre>
+        </div>
+      </section>
+
+      <!-- Dev -->
+      <section id="tab-dev" class="tab-panel" hidden>
+        <div class="panel-head">
+          <button id="dev-start" class="lane-btn primary">Start dev server</button>
+          <button id="dev-stop" class="lane-btn hidden">Stop</button>
+          <span id="dev-url-wrap" class="dev-url hidden">
+            <a id="dev-url" href="#" target="_blank" rel="noreferrer"></a>
+            <button id="dev-reload" class="ghost-btn" title="Reload preview">⟳</button>
+          </span>
+          <span class="grow"></span>
+          <span id="dev-status" class="status-chip"></span>
+        </div>
+        <div class="dev-split">
+          <iframe id="dev-preview" class="preview hidden" title="App preview"></iframe>
+          <pre id="dev-console" class="console"></pre>
+        </div>
+      </section>
+
+      <!-- Dependencies -->
+      <section id="tab-deps" class="tab-panel" hidden>
+        <div class="panel-head wrap">
+          <button id="deps-check" class="lane-btn">Check outdated</button>
+          <button id="deps-audit" class="lane-btn">Audit</button>
+          <label class="scripts">
+            <span>Scope</span>
+            <select id="deps-scope">
+              <option value="patch">patch</option>
+              <option value="minor" selected>minor</option>
+              <option value="major">major</option>
+            </select>
+          </label>
+          <button id="deps-update" class="lane-btn primary">Safe update</button>
+          <span class="grow"></span>
+          <button id="deps-fix" class="fix-btn hidden">✦ Fix with Copilot</button>
+        </div>
+        <div id="audit-summary" class="audit hidden"></div>
+        <div id="outdated" class="outdated"></div>
+        <pre id="deps-log" class="console hidden"></pre>
+      </section>
+    </main>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

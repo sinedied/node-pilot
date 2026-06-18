@@ -1,0 +1,30 @@
+{
+  "name": "node-pilot",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A GitHub Copilot canvas extension to build, lint, type-check, test and run JavaScript / Node.js / web apps — and update dependencies without breaking them — from the Copilot app side panel.",
+  "license": "MIT",
+  "author": "Yohan Lasorsa",
+  "keywords": [
+    "github-copilot",
+    "copilot-extension",
+    "canvas",
+    "javascript",
+    "nodejs",
+    "web",
+    "vite",
+    "npm",
+    "pnpm",
+    "yarn",
+    "bun"
+  ],
+  "scripts": {
+    "check": "node --check extension.mjs && for f in src/*.mjs; do node --check \"$f\" || exit 1; done",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "devDependencies": {
+    "prettier": "^3.4.2"
+  }
+}
