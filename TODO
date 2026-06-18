@@ -9,6 +9,8 @@ Instead of pills, extract proper information about the project. Suggest useful i
 - [x] UI: spinner when running/loading
 - [x] icons for tabs
 
+- [ ] better UI: hint on hover/click
+
 - [ ] no disctinction in pinned script, default pinned scripts can be unpinned too
 
 - [ ] dogfood all features
@@ -16,7 +18,6 @@ Instead of pills, extract proper information about the project. Suggest useful i
   * call /rubber-duck after each new set of changes after you're done
 
 
-- [ ] better UI: hint on hover/click
 
   * language server TS
   * lint errors

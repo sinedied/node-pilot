@@ -65,6 +65,10 @@ inspiration: [coffilot](https://github.com/jdubois/coffilot). Full design in
   The working resolution is to force **one uniform cursor everywhere**: a global
   `*, *::before, *::after { cursor: default !important; }` in `public/style.css`, with
   no per-element `cursor:` rules. One state means nothing for the host to flip between.
+  Because the pointer cursor is unavailable, interactivity is signalled with visual
+  state instead — `:hover` (bg/border/elevation), `:active` (slight `translateY(1px)`
+  - darken = the click hint), and `:focus-visible` (accent focus ring) in
+    `public/style.css`. Add affordances there; never reach for `cursor:`.
 - **Settings persist server-side** in `~/.cockpit/settings.json` (keyed by project
   path), NOT in iframe `localStorage` — each canvas open gets a fresh loopback port,
   changing the origin and wiping `localStorage`. See `src/settings.ts`.

@@ -21,6 +21,10 @@
   --console-fg: #1f2328;
   --radius: 6px;
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  /* Keyboard focus ring (translucent accent) + subtle hover elevation. Recompute
+     per theme because they reference --accent, which is redefined below. */
+  --focus-ring: color-mix(in srgb, var(--accent) 40%, transparent);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.08);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -335,6 +339,87 @@ body {
   padding: 0 4px;
 }
 
+/* ---- Interaction states ----
+   `cursor` is forbidden (native-host cursor gotcha), so hover/press/focus visuals
+   are the affordance. Keep them subtle and Primer-native. */
+.lane-btn,
+.icon-btn,
+.ghost-btn,
+.fix-btn,
+.tabs button,
+.segmented button,
+.menu-item,
+.dev-url a,
+.suite > summary.suite-head {
+  transition:
+    background-color 0.1s ease,
+    border-color 0.1s ease,
+    color 0.1s ease,
+    box-shadow 0.1s ease,
+    transform 0.06s ease;
+}
+
+/* Press feedback: a small dip + darken (the core "click hint"). */
+.lane-btn:active,
+.icon-btn:active,
+.ghost-btn:active,
+.fix-btn:active,
+.tabs button:active,
+.segmented button:active {
+  transform: translateY(1px);
+}
+
+.lane-btn:not(.primary):active,
+.icon-btn:active,
+.ghost-btn:active {
+  background: var(--bg-inset);
+  border-color: var(--dim);
+}
+
+.lane-btn.primary:active,
+.segmented button.on:active {
+  filter: brightness(0.94);
+}
+
+.fix-btn:active {
+  background: color-mix(in srgb, var(--purple) 30%, transparent);
+}
+
+/* Keyboard-only focus ring (mouse clicks won't leave a persistent ring). */
+.lane-btn:focus-visible,
+.icon-btn:focus-visible,
+.ghost-btn:focus-visible,
+.fix-btn:focus-visible,
+.tabs button:focus-visible,
+.segmented button:focus-visible,
+.menu-item:focus-visible,
+.menu-item input:focus-visible,
+.dev-url a:focus-visible,
+.suite > summary.suite-head:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+/* Disabled controls stay visually inert (no hover lift / no press). */
+.lane-btn:disabled,
+.lane-btn:disabled:hover,
+.icon-btn:disabled,
+.icon-btn:disabled:hover,
+.ghost-btn:disabled,
+.ghost-btn:disabled:hover,
+.fix-btn:disabled,
+.fix-btn:disabled:hover {
+  transform: none;
+  box-shadow: none;
+  filter: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition-duration: 0.001ms !important;
+  }
+}
+
 /* ---- Buttons ---- */
 .lane-btn {
   display: inline-flex;
@@ -353,6 +438,7 @@ body {
 .lane-btn:hover {
   background: var(--bg-inset);
   border-color: var(--dim);
+  box-shadow: var(--shadow-sm);
 }
 
 .lane-btn .oi {
@@ -413,6 +499,7 @@ body {
 .icon-btn:hover,
 .ghost-btn:hover {
   background: var(--bg-inset);
+  box-shadow: var(--shadow-sm);
 }
 
 .icon-btn:hover .oi {
@@ -464,6 +551,11 @@ body {
   border-top: 5px solid currentColor;
   opacity: 0.6;
   margin-left: 1px;
+  transition: transform 0.12s ease;
+}
+
+[aria-expanded="true"] > .caret {
+  transform: rotate(180deg);
 }
 
 /* ---- Scripts popover ---- */
@@ -558,6 +650,11 @@ body {
   color: var(--on-emphasis);
 }
 
+.segmented button:hover:not(.on) {
+  background: var(--bg-inset);
+  color: var(--text);
+}
+
 /* ---- Tabs ---- */
 .tabs {
   display: flex;
@@ -588,6 +685,15 @@ body {
 .tabs button.active {
   color: var(--text);
   border-bottom-color: var(--accent-emphasis);
+}
+
+.tabs button:hover:not(.active) {
+  color: var(--text);
+  border-bottom-color: var(--border);
+}
+
+.tabs button:hover .oi {
+  opacity: 1;
 }
 
 .tabs button.hidden {
@@ -785,6 +891,30 @@ main {
   display: none;
 }
 
+.suite > summary.suite-head:hover {
+  background: var(--bg-inset);
+}
+
+/* CSS-only fold caret: rotates from a right-pointing triangle to a down-pointing
+   one when the file is expanded. Replaces the hidden native marker and signals
+   expand/collapse without a pointer cursor. */
+.suite > summary.suite-head::before {
+  content: "";
+  flex: none;
+  width: 0;
+  height: 0;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  border-left: 5px solid currentColor;
+  opacity: 0.6;
+  transform: rotate(0deg);
+  transition: transform 0.12s ease;
+}
+
+.suite[open] > summary.suite-head::before {
+  transform: rotate(90deg);
+}
+
 .suite-head .suite-status {
   flex: none;
   width: 14px;
@@ -895,6 +1025,10 @@ main {
   color: var(--accent);
   font-family: var(--mono);
   text-decoration: none;
+}
+
+.dev-url a:hover {
+  text-decoration: underline;
 }
 
 /* ---- Dependencies ---- */
