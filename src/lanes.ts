@@ -2,7 +2,13 @@
 // project's own package.json scripts; otherwise fall back to running the locally
 // installed tool with sensible defaults.
 import { runScript, exec } from "./pm.ts";
-import type { LaneAvailability, LaneResult, ProjectDetection } from "./types.ts";
+import type {
+  Detection,
+  LaneAvailability,
+  LaneResult,
+  PinnedTask,
+  ProjectDetection,
+} from "./types.ts";
 
 function hasScript(d: ProjectDetection, name: string): boolean {
   return Boolean(d.scripts && d.scripts[name]);
@@ -200,4 +206,17 @@ export function laneAvailability(d: ProjectDetection | null): LaneAvailability {
     test: !resolveTest(d).unavailable,
     dev: !resolveDev(d).unavailable,
   };
+}
+
+// The built-in lane tasks, in toolbar order. `dev` is intentionally excluded —
+// it lives in its own tab (persistent start/stop/URL/preview state).
+export const LANE_TASK_ORDER = ["build", "typecheck", "lint", "format", "test"] as const;
+
+// Default pinned tasks when a project has no saved config yet: every built-in
+// lane that can actually run, in order. These behave like any other pinned task
+// (unpinnable) once a project has its own config.
+export function defaultPinnedTasks(d: Detection | null): PinnedTask[] {
+  const pd: ProjectDetection | null = d && d.hasProject ? d : null;
+  const av = laneAvailability(pd);
+  return LANE_TASK_ORDER.filter((id) => av[id]).map((id) => ({ type: "lane", id }));
 }

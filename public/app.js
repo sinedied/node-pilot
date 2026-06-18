@@ -13,7 +13,7 @@ const state = {
   test: { report: null },
   dev: { status: "stopped", url: null, output: "" },
   deps: { outdated: null, audit: null, update: null },
-  settings: { theme: "auto", pinnedScripts: [] },
+  settings: { theme: "auto", pinnedTasks: [] },
   stats: null,
 };
 
@@ -93,23 +93,38 @@ function setControlsEnabled(enabled) {
 }
 
 // ---- Loading indicators ---------------------------------------------------
-// Swap a button's leading icon for a spinner and block further clicks while a
-// task runs. Spinner is rotate-only — never set `cursor` (native-host gotcha).
+// Show a spinner and block further clicks while a task runs. Spinner is
+// rotate-only — never set `cursor` (native-host gotcha). Works for buttons that
+// have a leading icon (swap it) and icon-less buttons (inject a spinner).
 
 function setBtnLoading(btn, on) {
   if (!btn) return;
   const use = btn.querySelector(".oi use");
-  const icon = btn.querySelector(".oi");
   if (on) {
-    if (use && !btn.dataset.icon0) btn.dataset.icon0 = use.getAttribute("href") || "";
-    if (use) use.setAttribute("href", "#oct-sync");
-    icon?.classList.add("spin");
     btn.classList.add("loading");
+    if (use) {
+      // Button already has a leading icon: swap it for the spinner glyph.
+      if (!btn.dataset.icon0) btn.dataset.icon0 = use.getAttribute("href") || "";
+      use.setAttribute("href", "#oct-sync");
+      use.parentElement.classList.add("spin");
+    } else if (!btn.querySelector(".oi.spin-injected")) {
+      // Icon-less button: inject a temporary leading spinner.
+      const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      svg.setAttribute("class", "oi spin spin-injected");
+      const u = document.createElementNS("http://www.w3.org/2000/svg", "use");
+      u.setAttribute("href", "#oct-sync");
+      svg.append(u);
+      btn.prepend(svg);
+    }
   } else {
-    if (use && btn.dataset.icon0) use.setAttribute("href", btn.dataset.icon0);
-    icon?.classList.remove("spin");
     btn.classList.remove("loading");
-    delete btn.dataset.icon0;
+    const injected = btn.querySelector(".oi.spin-injected");
+    if (injected) injected.remove();
+    if (use && btn.dataset.icon0) {
+      use.setAttribute("href", btn.dataset.icon0);
+      use.parentElement.classList.remove("spin");
+      delete btn.dataset.icon0;
+    }
   }
 }
 
@@ -117,12 +132,16 @@ function isRunning(id) {
   return laneStatus(id) === "running";
 }
 
-// Reflect running lanes (build/lint/format/typecheck/test) and pinned scripts as
-// spinning, click-blocked buttons. Safe to call repeatedly (idempotent).
+// The lane-status key a pinned task button maps to (lanes are keyed by id,
+// scripts by `script:<name>`).
+function taskStatusId(btn) {
+  return btn.dataset.taskType === "script" ? `script:${btn.dataset.taskName}` : btn.dataset.taskId;
+}
+
+// Reflect running tasks as spinning, click-blocked buttons. Idempotent.
 function renderRunning() {
-  $$(".lane-btn[data-lane]").forEach((b) => setBtnLoading(b, isRunning(b.dataset.lane)));
-  $$("#pinned .lane-btn[data-script]").forEach((b) =>
-    setBtnLoading(b, isRunning(`script:${b.dataset.script}`)),
+  $$("#pinned .lane-btn[data-task-type]").forEach((b) =>
+    setBtnLoading(b, isRunning(taskStatusId(b))),
   );
 }
 
@@ -256,7 +275,6 @@ function renderProject() {
     build: depsRows[4].querySelector(".info-row-value"),
   };
 
-  renderLanes();
   renderTabs();
   renderPinned();
   loadStats(lazyRows, d);
@@ -305,16 +323,6 @@ async function loadStats(rows, detection) {
   );
 }
 
-// Show only the lane buttons that apply to this project.
-function renderLanes() {
-  const a = state.detection?.availability || {};
-  const hasProject = !!state.detection?.hasProject;
-  $$(".lane-btn[data-lane]").forEach((b) => {
-    const hide = hasProject && a[b.dataset.lane] === false;
-    b.classList.toggle("hidden", hide);
-  });
-}
-
 // Hide the Tests / Dev tabs when the project has nothing to run there.
 function renderTabs() {
   const a = state.detection?.availability || {};
@@ -325,53 +333,89 @@ function renderTabs() {
   if (active && active.classList.contains("hidden")) showTab("console");
 }
 
-// ---- Scripts (pinnable menu) ----------------------------------------------
+// ---- Tasks (unified pinned lanes + scripts) -------------------------------
+
+// Built-in lane tasks, in toolbar order, with display labels. `dev` lives in
+// its own tab and is intentionally not a pinnable task.
+const LANE_TASKS = [
+  { id: "build", label: "Build" },
+  { id: "typecheck", label: "Type-check" },
+  { id: "lint", label: "Lint" },
+  { id: "format", label: "Format" },
+  { id: "test", label: "Test" },
+];
+const LANE_LABEL = Object.fromEntries(LANE_TASKS.map((t) => [t.id, t.label]));
+
+function taskKey(t) {
+  return t.type === "lane" ? `lane:${t.id}` : `script:${t.name}`;
+}
+
+function taskLabel(t) {
+  return t.type === "lane" ? LANE_LABEL[t.id] || t.id : t.name;
+}
+
+// Whether a pinned task can currently run (its lane is available / its script
+// still exists). Unavailable tasks stay pinned but are hidden from the toolbar.
+function taskAvailable(t) {
+  if (t.type === "lane") return state.detection?.availability?.[t.id] !== false;
+  return (state.detection?.scriptNames || []).includes(t.name);
+}
+
+// Dispatch a task: the `test` lane has its own endpoint/report; other lanes go
+// through /api/lane; scripts through /api/script.
+function runTask(t) {
+  if (t.type === "lane") {
+    if (t.id === "test") return api("/api/test", {});
+    return api("/api/lane", { id: t.id });
+  }
+  return api("/api/script", { name: t.name });
+}
 
 function renderPinned() {
   const wrap = $("#pinned");
   wrap.innerHTML = "";
-  const names = state.detection?.scriptNames || [];
-  for (const name of state.settings.pinnedScripts || []) {
-    if (!names.includes(name)) continue;
+  const hasProject = !!state.detection?.hasProject;
+  const tasks = (state.settings.pinnedTasks || []).filter(taskAvailable);
+  for (const t of tasks) {
     const b = document.createElement("button");
-    b.className = "lane-btn script";
-    b.dataset.script = name;
-    b.disabled = !state.detection?.hasProject;
-    b.innerHTML = `<svg class="oi"><use href="#oct-terminal" /></svg>`;
-    b.append(document.createTextNode(name));
-    b.addEventListener("click", () => api("/api/script", { name }));
+    b.className = "lane-btn task";
+    b.dataset.taskType = t.type;
+    if (t.type === "lane") b.dataset.taskId = t.id;
+    else b.dataset.taskName = t.name;
+    b.disabled = !hasProject;
+    b.textContent = taskLabel(t);
+    b.addEventListener("click", () => runTask(t));
     wrap.append(b);
   }
+  $("#pinned-empty").classList.toggle("hidden", !hasProject || tasks.length > 0);
   renderRunning();
 }
 
-function renderScriptsMenu() {
-  const menu = $("#scripts-menu");
-  const names = state.detection?.scriptNames || [];
-  const pinned = new Set(state.settings.pinnedScripts || []);
-  menu.innerHTML = "";
-  if (!names.length) {
-    menu.innerHTML = '<div class="menu-empty">No scripts in package.json.</div>';
-    return;
-  }
+function isPinned(t) {
+  const key = taskKey(t);
+  return (state.settings.pinnedTasks || []).some((p) => taskKey(p) === key);
+}
+
+function menuGroup(menu, title, tasks) {
+  if (!tasks.length) return;
   const head = document.createElement("div");
   head.className = "menu-head";
-  head.textContent = "Pin to toolbar · click a name to run";
+  head.textContent = title;
   menu.append(head);
-  for (const name of names) {
+  for (const t of tasks) {
     const item = document.createElement("div");
     item.className = "menu-item";
     const cb = document.createElement("input");
     cb.type = "checkbox";
-    cb.checked = pinned.has(name);
+    cb.checked = isPinned(t);
     cb.title = "Pin to toolbar";
-    cb.addEventListener("change", () => togglePin(name, cb.checked));
+    cb.addEventListener("change", () => togglePin(t, cb.checked));
     const label = document.createElement("span");
     label.className = "menu-name";
-    label.textContent = name;
-    label.title = "Run script";
+    label.textContent = taskLabel(t);
+    label.title = "Run now";
     label.addEventListener("click", () => {
-      api("/api/script", { name });
+      runTask(t);
       closeScriptsMenu();
     });
     item.append(cb, label);
@@ -379,17 +423,35 @@ function renderScriptsMenu() {
   }
 }
 
-async function togglePin(name, pin) {
-  const set = new Set(state.settings.pinnedScripts || []);
-  if (pin) set.add(name);
-  else set.delete(name);
-  const names = state.detection?.scriptNames || [];
-  const pinnedScripts = names.filter((n) => set.has(n));
-  state.settings.pinnedScripts = pinnedScripts;
+function renderScriptsMenu() {
+  const menu = $("#scripts-menu");
+  menu.innerHTML = "";
+  const a = state.detection?.availability || {};
+  const laneTasks = LANE_TASKS.filter((t) => a[t.id] !== false).map((t) => ({
+    type: "lane",
+    id: t.id,
+  }));
+  const scriptTasks = (state.detection?.scriptNames || []).map((name) => ({
+    type: "script",
+    name,
+  }));
+  if (!laneTasks.length && !scriptTasks.length) {
+    menu.innerHTML = '<div class="menu-empty">No tasks available.</div>';
+    return;
+  }
+  menuGroup(menu, "Tasks", laneTasks);
+  menuGroup(menu, "Scripts", scriptTasks);
+}
+
+async function togglePin(task, pin) {
+  const key = taskKey(task);
+  let next = (state.settings.pinnedTasks || []).filter((p) => taskKey(p) !== key);
+  if (pin) next.push(task);
+  state.settings.pinnedTasks = next;
   renderPinned();
-  const res = await api("/api/settings", { pinnedScripts });
-  if (res && Array.isArray(res.pinnedScripts)) {
-    state.settings.pinnedScripts = res.pinnedScripts;
+  const res = await api("/api/settings", { pinnedTasks: next });
+  if (res && Array.isArray(res.pinnedTasks)) {
+    state.settings.pinnedTasks = res.pinnedTasks;
     renderPinned();
   }
 }
@@ -504,10 +566,23 @@ function renderTests() {
   const suites = $("#test-suites");
   suites.innerHTML = "";
   for (const s of report.suites || []) {
-    const div = document.createElement("div");
-    div.className = "suite";
-    const head = document.createElement("div");
+    const tests = s.tests || [];
+    const failed = tests.filter((t) => t.status === "failed").length;
+    const passed = tests.filter((t) => t.status === "passed").length;
+    const skipped = tests.length - failed - passed;
+    const kind = failed ? "failed" : skipped ? "skipped" : "passed";
+    const statusIcon =
+      kind === "failed" ? "x-circle-fill" : kind === "passed" ? "check-circle-fill" : "dot-fill";
+
+    // Native <details> avoids a JS toggle (and the native-host cursor fight).
+    // Folded by default; auto-open only when the file has failures.
+    const det = document.createElement("details");
+    det.className = `suite ${kind}`;
+    if (failed) det.open = true;
+
+    const head = document.createElement("summary");
     head.className = "suite-head";
+    head.innerHTML = `<svg class="oi suite-status"><use href="#oct-${statusIcon}" /></svg>`;
 
     const name = document.createElement("span");
     name.className = "suite-name";
@@ -515,29 +590,35 @@ function renderTests() {
     name.title = s.name;
     head.append(name);
 
+    const counts = [];
+    if (passed) counts.push(`${passed} passed`);
+    if (failed) counts.push(`${failed} failed`);
+    if (skipped) counts.push(`${skipped} skipped`);
+    const dur = fmtDuration(s.durationMs);
     const meta = document.createElement("span");
     meta.className = "suite-meta";
-    const count = (s.tests || []).length;
-    const dur = fmtDuration(s.durationMs);
-    meta.textContent = `${count} ${count === 1 ? "test" : "tests"}${dur ? ` · ${dur}` : ""}`;
+    meta.textContent = `${counts.join(" · ") || "no tests"}${dur ? ` · ${dur}` : ""}`;
     head.append(meta);
 
-    div.append(head);
-    for (const t of s.tests || []) {
+    det.append(head);
+    const rows = document.createElement("div");
+    rows.className = "suite-rows";
+    for (const t of tests) {
       const row = document.createElement("div");
       row.className = `test-row ${t.status}`;
       const icon = TEST_ICON[t.status] || "dot-fill";
       row.innerHTML = `<svg class="oi"><use href="#oct-${icon}" /></svg><span class="name"></span>`;
       row.querySelector(".name").textContent = t.name || "(unnamed)";
-      div.append(row);
+      rows.append(row);
       if (t.status === "failed" && t.message) {
         const msg = document.createElement("pre");
         msg.className = "test-msg";
         msg.textContent = strip(t.message);
-        div.append(msg);
+        rows.append(msg);
       }
     }
-    suites.append(div);
+    det.append(rows);
+    suites.append(det);
   }
   $("#test-raw").textContent = strip(state.lanes.test?.output || "");
 }
@@ -650,7 +731,7 @@ function renderUpdate() {
 
 async function refreshSettings() {
   const s = await api("/api/settings");
-  state.settings = { theme: s.theme || "auto", pinnedScripts: s.pinnedScripts || [] };
+  state.settings = { theme: s.theme || "auto", pinnedTasks: s.pinnedTasks || [] };
   applyTheme(state.settings.theme);
   renderPinned();
 }
@@ -774,10 +855,6 @@ function connect() {
 
 // ---- Wiring ---------------------------------------------------------------
 
-$$(".lane-btn[data-lane]").forEach((b) => {
-  b.addEventListener("click", () => api("/api/lane", { id: b.dataset.lane }));
-});
-$("#test-btn").addEventListener("click", () => api("/api/test", {}));
 $("#refresh").addEventListener("click", () => api("/api/refresh", {}));
 
 $("#theme-toggle").addEventListener("click", () => {

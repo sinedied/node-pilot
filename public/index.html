@@ -146,30 +146,17 @@
     <div id="notice" class="notice hidden"></div>
 
     <nav class="toolbar" id="toolbar">
-      <button class="lane-btn" data-lane="build">
-        <svg class="oi"><use href="#oct-tools" /></svg>Build
-      </button>
-      <button class="lane-btn" data-lane="typecheck">
-        <svg class="oi"><use href="#oct-typography" /></svg>Type-check
-      </button>
-      <button class="lane-btn" data-lane="lint">
-        <svg class="oi"><use href="#oct-checklist" /></svg>Lint
-      </button>
-      <button class="lane-btn" data-lane="format">
-        <svg class="oi"><use href="#oct-paintbrush" /></svg>Format
-      </button>
-      <button class="lane-btn" id="test-btn" data-lane="test">
-        <svg class="oi"><use href="#oct-beaker" /></svg>Test
-      </button>
-      <span class="sep" aria-hidden="true"></span>
       <span id="pinned" class="pinned"></span>
       <div class="menu-wrap">
         <button id="scripts-toggle" class="lane-btn" aria-haspopup="true" aria-expanded="false">
-          <svg class="oi"><use href="#oct-terminal" /></svg>Scripts<span class="caret"></span>
+          <svg class="oi"><use href="#oct-terminal" /></svg>Tasks<span class="caret"></span>
         </button>
         <div id="scripts-menu" class="popover hidden" role="menu"></div>
       </div>
     </nav>
+    <div id="pinned-empty" class="pinned-empty hidden">
+      No tasks pinned. Open <b>Tasks</b> to pin build, lint, test or any script.
+    </div>
 
     <div class="tabs" id="tabs">
       <button data-tab="info" class="active">

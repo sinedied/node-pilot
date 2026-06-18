@@ -377,14 +377,14 @@ body {
   filter: brightness(1.08);
 }
 
-.lane-btn.script {
+.lane-btn.task {
   background: transparent;
   border-color: var(--border-muted);
   color: var(--text);
   font-weight: 450;
 }
 
-.lane-btn.script .oi {
+.lane-btn.task .oi {
   color: var(--dim);
 }
 
@@ -443,6 +443,17 @@ body {
 
 .pinned {
   display: contents;
+}
+
+.pinned-empty {
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--dim);
+  border-bottom: 1px solid var(--border);
+}
+
+.pinned-empty.hidden {
+  display: none;
 }
 
 .caret {
@@ -737,6 +748,8 @@ main {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  /* Keep the last file's bottom border off the scroll edge so it isn't clipped. */
+  padding-bottom: 2px;
 }
 
 #tests-body {
@@ -751,9 +764,13 @@ main {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   overflow: hidden;
+  flex: none;
 }
 
-.suite > .suite-head {
+/* Native <details> disclosure: drop the default marker (we show our own status
+   icon) and keep the summary on one tidy row. Never set `cursor` (host gotcha). */
+.suite > summary.suite-head {
+  list-style: none;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -761,6 +778,28 @@ main {
   background: var(--bg-elev);
   font-family: var(--mono);
   font-size: 12px;
+  color: var(--dim);
+}
+
+.suite > summary.suite-head::-webkit-details-marker {
+  display: none;
+}
+
+.suite-head .suite-status {
+  flex: none;
+  width: 14px;
+  height: 14px;
+}
+
+.suite.passed .suite-status {
+  color: var(--green);
+}
+
+.suite.failed .suite-status {
+  color: var(--red);
+}
+
+.suite.skipped .suite-status {
   color: var(--dim);
 }
 

@@ -8,11 +8,17 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { detect } from "./detect.ts";
 import { run, start } from "./process-runner.ts";
 import { runScript as pmRunScript } from "./pm.ts";
-import { resolveLane, resolveDev, resolveTest, laneAvailability } from "./lanes.ts";
+import {
+  resolveLane,
+  resolveDev,
+  resolveTest,
+  laneAvailability,
+  defaultPinnedTasks,
+} from "./lanes.ts";
 import { parseJestLike, parseTap, parseTextCounts } from "./test-report.ts";
 import { pushCapped, extractUrl, isPortInUse } from "./util.ts";
 import { buildFixPrompt, buildTestFixPrompt } from "./fix.ts";
-import { loadSettings, saveSettings, defaultPinnedScripts } from "./settings.ts";
+import { loadSettings, saveSettings } from "./settings.ts";
 import { computeStats } from "./info.ts";
 import * as deps from "./deps.ts";
 import type { SafeUpdateOptions, SafeUpdateResult } from "./deps.ts";
@@ -143,29 +149,24 @@ export class Controller {
     return this._statsPromise;
   }
 
-  // ---- UI settings (pinned scripts + theme), persisted per project ----------
+  // ---- UI settings (pinned tasks + theme), persisted per project ------------
 
   async getSettings(): Promise<ResolvedSettings> {
     const s = await loadSettings(this.cwd);
-    if (s.pinnedScripts == null) {
-      // First load: seed the suggested pins and persist them explicitly, but
-      // only once detection is ready — so they become a normal user-owned list
-      // (unpinnable, never re-resolved) rather than a dynamic default. Don't
-      // lock in an empty list before detection lands.
-      const seeded = defaultPinnedScripts(this.detection);
-      if (this.detection?.hasProject) await saveSettings(this.cwd, { pinnedScripts: seeded });
-      return { theme: s.theme || "auto", pinnedScripts: seeded };
-    }
-    return { theme: s.theme || "auto", pinnedScripts: s.pinnedScripts };
+    // `null` = no saved config: materialize the default tasks in-memory only.
+    // We never write on a read, so the project stays on "defaults" (and picks up
+    // newly-available lanes after re-detection) until the user pins/unpins.
+    const pinnedTasks = s.pinnedTasks ?? defaultPinnedTasks(this.detection);
+    return { theme: s.theme || "auto", pinnedTasks };
   }
 
   async setSettings(patch: SettingsPatch = {}): Promise<ResolvedSettings> {
     const clean: SettingsPatch = {};
     if (typeof patch.theme === "string") clean.theme = patch.theme;
-    if (Array.isArray(patch.pinnedScripts)) clean.pinnedScripts = patch.pinnedScripts;
+    if (Array.isArray(patch.pinnedTasks)) clean.pinnedTasks = patch.pinnedTasks;
     const s = await saveSettings(this.cwd, clean);
-    const pinned = s.pinnedScripts == null ? defaultPinnedScripts(this.detection) : s.pinnedScripts;
-    return { theme: s.theme || "auto", pinnedScripts: pinned };
+    const pinnedTasks = s.pinnedTasks ?? defaultPinnedTasks(this.detection);
+    return { theme: s.theme || "auto", pinnedTasks };
   }
 
   getState() {

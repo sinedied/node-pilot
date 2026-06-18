@@ -234,18 +234,25 @@ export interface RunResult {
 
 export type AppEvent = { type: string } & Record<string, unknown>;
 
+export type LaneId = "build" | "typecheck" | "lint" | "format" | "test";
+
+export type PinnedTask = { type: "lane"; id: LaneId } | { type: "script"; name: string };
+
 export interface Settings {
-  pinnedScripts: string[] | null;
+  // `null` means "no per-project config yet" → fall back to the default tasks.
+  pinnedTasks: PinnedTask[] | null;
   theme: string;
+  // Legacy field kept only so older settings.json files can be migrated.
+  pinnedScripts?: string[] | null;
 }
 
 export interface ResolvedSettings {
-  pinnedScripts: string[];
+  pinnedTasks: PinnedTask[];
   theme: string;
 }
 
 export interface SettingsPatch {
-  pinnedScripts?: string[];
+  pinnedTasks?: PinnedTask[];
   theme?: string;
 }
 

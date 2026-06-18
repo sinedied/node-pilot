@@ -23,7 +23,7 @@ inspiration: [coffilot](https://github.com/jdubois/coffilot). Full design in
     `deps.ts` (safe-update loop + rollback), `info.ts` (lazy Info-tab metrics:
     transitive deps + sizes), `controller.ts` (central state + SSE
     events), `server.ts` (http + SSE + `/api/*`), `actions.ts` (agent actions),
-    `fix.ts` (prompt builders), `settings.ts` (per-project pinned scripts + theme).
+    `fix.ts` (prompt builders), `settings.ts` (per-project pinned tasks + theme).
 - `types/copilot-sdk.d.ts` — ambient shim for `@github/copilot-sdk/extension` so `tsc`
   resolves it in CI (the real package only exists inside the Copilot app).
 - `public/` — vanilla HTML/CSS/JS UI (Info / Console / Tests / Dev / Dependencies tabs),

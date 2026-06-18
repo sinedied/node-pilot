@@ -125,7 +125,7 @@ src/
   server.ts              http + SSE + static + /api endpoints
   actions.ts             agent-callable canvas actions
   fix.ts                 "Fix with Copilot" prompt builders
-  settings.ts            per-project pinned-scripts + theme persistence
+  settings.ts            per-project pinned-tasks + theme persistence
 types/copilot-sdk.d.ts   ambient SDK shim (so tsc resolves the SDK in CI)
 public/                  index.html · app.js · style.css (Primer-styled vanilla UI)
 test/                    Vitest specs · scripts/smoke.mjs (type-stripping load)
@@ -133,13 +133,15 @@ tsconfig*.json           Node + browser (checkJs) type-check configs
 .github/workflows/ci.yml CI: format → build → smoke → test on Node 22.18 & 24
 ```
 
-The toolbar only shows the lanes a project actually supports, the Tests/Dev tabs
-hide when there is nothing to run there, and every `package.json` script is
-available from the **Scripts** menu (check one to pin it to the toolbar). The pinned
-scripts and the theme preference are persisted per project in
-`~/.cockpit/settings.json` — not in your repository. (iframe `localStorage` is
-unreliable here because each canvas open gets a fresh loopback port, which changes
-the page origin.)
+The toolbar is a single row of **pinned tasks** — built-in lanes (Build, Type-check,
+Lint, Format, Test) and `package.json` scripts share one zone with no distinction.
+Open the **Tasks** menu to pin/unpin any of them (click a name to run it now); when a
+project has no saved config yet, every built-in lane that applies is pinned by
+default. Only tasks that actually apply are shown, and the Tests/Dev tabs hide when
+there is nothing to run there. The pinned tasks and the theme preference are
+persisted per project in `~/.cockpit/settings.json` — not in your repository. (iframe
+`localStorage` is unreliable here because each canvas open gets a fresh loopback port,
+which changes the page origin.)
 
 The backend is **TypeScript with no build step** — Node ≥ 22.18 runs the `.ts`
 sources directly via native type-stripping, so there is nothing to compile or bundle

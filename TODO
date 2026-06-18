@@ -5,16 +5,18 @@
 - [x] move toolbar to "Info" tab, with refresh and theme there. Should be first tab.
 - [x] in the info tab, instead of "Project" show the found project name in package.json. The project name then should be removed from the list of pills.
 Instead of pills, extract proper information about the project. Suggest useful info that could be displayed here, in addition to the "stack" pills, like number of dependencies with total number of included dependencies with transitives, bundle size etc. Platform (min Node.js version, package manager, etc). This extension activation relies on the presence of a package.json, so if none is present show a message that the extension is not active because no package.json was found. 
+- [x] test panel: missing spacing
+- [x] UI: spinner when running/loading
+- [x] icons for tabs
 
-- [ ] UI: spinner when running/loading
-
-- [ ] icons for tabs
 - [ ] no disctinction in pinned script, default pinned scripts can be unpinned too
 
 - [ ] dogfood all features
 - [ ] new AGENTS.md rule: ensure UI is responsive and usable at small widths
+  * call /rubber-duck after each new set of changes after you're done
 
-- [ ] test panel: missing spacing
+
+- [ ]
 
   * language server TS
   * lint errors
