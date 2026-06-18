@@ -134,6 +134,8 @@ describe("test-report parsers", () => {
       testResults: [
         {
           name: "a.test.js",
+          startTime: 1000,
+          endTime: 1250,
           assertionResults: [
             { ancestorTitles: ["group"], title: "ok", status: "passed" },
             { ancestorTitles: [], title: "bad", status: "failed", failureMessages: ["boom"] },
@@ -145,6 +147,7 @@ describe("test-report parsers", () => {
     expect(report.passed).toBe(2);
     expect(report.failed).toBe(1);
     expect(report.ok).toBe(false);
+    expect(report.suites[0].durationMs).toBe(250);
     expect(report.suites[0].tests[1].message).toBe("boom");
   });
 

@@ -112,6 +112,7 @@ export interface TestCase {
 
 export interface TestSuite {
   name: string;
+  durationMs: number | null;
   tests: TestCase[];
 }
 

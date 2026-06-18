@@ -12,8 +12,11 @@ export function parseJestLike(json: any): TestReport {
   const report = emptyReport();
   const results = Array.isArray(json?.testResults) ? json.testResults : [];
   for (const file of results) {
+    const start = Number(file.startTime);
+    const end = Number(file.endTime);
     const suite = {
       name: file.name || file.testFilePath || "tests",
+      durationMs: Number.isFinite(start) && Number.isFinite(end) ? Math.max(0, end - start) : null,
       tests: [] as TestReport["suites"][number]["tests"],
     };
     const assertions = Array.isArray(file.assertionResults) ? file.assertionResults : [];
@@ -58,7 +61,11 @@ function tallyFromSuites(report: TestReport): void {
 // node:test (and any TAP13 emitter): parse `ok` / `not ok` lines.
 export function parseTap(text: string): TestReport {
   const report = emptyReport();
-  const suite = { name: "tests", tests: [] as TestReport["suites"][number]["tests"] };
+  const suite = {
+    name: "tests",
+    durationMs: null,
+    tests: [] as TestReport["suites"][number]["tests"],
+  };
   const lines = (text || "").split(/\r?\n/);
   let pendingFail: TestReport["suites"][number]["tests"][number] | null = null;
   for (const line of lines) {

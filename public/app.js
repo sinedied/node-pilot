@@ -92,6 +92,48 @@ function setControlsEnabled(enabled) {
   $$(".segmented button").forEach((b) => (b.disabled = !enabled));
 }
 
+// ---- Loading indicators ---------------------------------------------------
+// Swap a button's leading icon for a spinner and block further clicks while a
+// task runs. Spinner is rotate-only — never set `cursor` (native-host gotcha).
+
+function setBtnLoading(btn, on) {
+  if (!btn) return;
+  const use = btn.querySelector(".oi use");
+  const icon = btn.querySelector(".oi");
+  if (on) {
+    if (use && !btn.dataset.icon0) btn.dataset.icon0 = use.getAttribute("href") || "";
+    if (use) use.setAttribute("href", "#oct-sync");
+    icon?.classList.add("spin");
+    btn.classList.add("loading");
+  } else {
+    if (use && btn.dataset.icon0) use.setAttribute("href", btn.dataset.icon0);
+    icon?.classList.remove("spin");
+    btn.classList.remove("loading");
+    delete btn.dataset.icon0;
+  }
+}
+
+function isRunning(id) {
+  return laneStatus(id) === "running";
+}
+
+// Reflect running lanes (build/lint/format/typecheck/test) and pinned scripts as
+// spinning, click-blocked buttons. Safe to call repeatedly (idempotent).
+function renderRunning() {
+  $$(".lane-btn[data-lane]").forEach((b) => setBtnLoading(b, isRunning(b.dataset.lane)));
+  $$("#pinned .lane-btn[data-script]").forEach((b) =>
+    setBtnLoading(b, isRunning(`script:${b.dataset.script}`)),
+  );
+}
+
+// Dependency action buttons: spinner on the active one, disable its siblings.
+function setDepsBusy(active, on) {
+  setBtnLoading(active, on);
+  for (const b of [$("#deps-check"), $("#deps-audit"), $("#deps-update")]) {
+    if (b && b !== active) b.disabled = on;
+  }
+}
+
 // Build one "label -> value" row for the Platform / Dependencies sections.
 // When `skeleton` is true the value renders as a shimmering placeholder until
 // the lazy stats arrive.
@@ -300,6 +342,7 @@ function renderPinned() {
     b.addEventListener("click", () => api("/api/script", { name }));
     wrap.append(b);
   }
+  renderRunning();
 }
 
 function renderScriptsMenu() {
@@ -412,11 +455,30 @@ const TEST_ICON = {
   todo: "dot-fill",
 };
 
+function relPath(p) {
+  if (!p) return p;
+  const cwd = state.detection?.cwd;
+  if (cwd && (p === cwd || p.startsWith(cwd + "/"))) {
+    return p.slice(cwd.length + 1) || p;
+  }
+  return p.split("/").pop() || p;
+}
+
+function fmtDuration(ms) {
+  if (ms == null || !isFinite(ms)) return null;
+  return ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(2)}s`;
+}
+
 function renderTests() {
   const report = state.test.report;
   const empty = $("#tests-empty");
   const body = $("#tests-body");
   if (!report) {
+    if (isRunning("test")) {
+      empty.innerHTML = `<svg class="oi spin"><use href="#oct-sync" /></svg> Running tests…`;
+    } else {
+      empty.innerHTML = "No test run yet. Press <b>Test</b>.";
+    }
     empty.classList.remove("hidden");
     body.classList.add("hidden");
     return;
@@ -445,8 +507,21 @@ function renderTests() {
     const div = document.createElement("div");
     div.className = "suite";
     const head = document.createElement("div");
-    head.className = "suite-name";
-    head.textContent = s.name;
+    head.className = "suite-head";
+
+    const name = document.createElement("span");
+    name.className = "suite-name";
+    name.textContent = relPath(s.name);
+    name.title = s.name;
+    head.append(name);
+
+    const meta = document.createElement("span");
+    meta.className = "suite-meta";
+    const count = (s.tests || []).length;
+    const dur = fmtDuration(s.durationMs);
+    meta.textContent = `${count} ${count === 1 ? "test" : "tests"}${dur ? ` · ${dur}` : ""}`;
+    head.append(meta);
+
     div.append(head);
     for (const t of s.tests || []) {
       const row = document.createElement("div");
@@ -474,7 +549,14 @@ function renderDev() {
   const running = dev.status === "running";
   $("#dev-start").classList.toggle("hidden", running);
   $("#dev-stop").classList.toggle("hidden", !running);
-  statusChip($("#dev-status"), running ? "running" : "stopped");
+  const status = $("#dev-status");
+  if (running && !dev.url) {
+    status.className = "status-chip running";
+    status.innerHTML = `<svg class="oi spin"><use href="#oct-sync" /></svg>`;
+    status.append(document.createTextNode("starting"));
+  } else {
+    statusChip(status, running ? "running" : "stopped");
+  }
 
   const urlWrap = $("#dev-url-wrap");
   const preview = $("#dev-preview");
@@ -584,6 +666,7 @@ function applyEvent(e) {
       renderOutdated();
       renderAudit();
       renderUpdate();
+      renderRunning();
       if (activeConsoleLane) setConsoleLane(activeConsoleLane);
       break;
     case "detection":
@@ -599,8 +682,10 @@ function applyEvent(e) {
         showTab("console");
       } else if (e.lane === "test") {
         showTab("tests");
+        renderTests();
       }
       renderConsoleStatus();
+      renderRunning();
       break;
     }
     case "lane:data": {
@@ -619,6 +704,7 @@ function applyEvent(e) {
       lane.exitCode = e.exitCode;
       if (e.lane === activeConsoleLane) renderConsoleStatus();
       if (e.lane === "test") renderTests();
+      renderRunning();
       break;
     }
     case "test:report":
@@ -652,6 +738,7 @@ function applyEvent(e) {
       break;
     case "deps:update-start":
       state.deps.update = { status: "running", log: [], scope: e.scope };
+      setDepsBusy($("#deps-update"), true);
       renderUpdate();
       break;
     case "deps:update-log":
@@ -665,6 +752,7 @@ function applyEvent(e) {
         failed: e.failed,
         fixAvailable: e.fixAvailable,
       });
+      setDepsBusy($("#deps-update"), false);
       renderUpdate();
       break;
     case "deps:rollback-done":
@@ -722,8 +810,24 @@ $("#dev-reload").addEventListener("click", () => {
   if (p.src) p.src = p.src;
 });
 
-$("#deps-check").addEventListener("click", () => api("/api/deps/outdated", {}));
-$("#deps-audit").addEventListener("click", () => api("/api/deps/audit", {}));
+$("#deps-check").addEventListener("click", async (e) => {
+  const btn = e.currentTarget;
+  setDepsBusy(btn, true);
+  try {
+    await api("/api/deps/outdated", {});
+  } finally {
+    setDepsBusy(btn, false);
+  }
+});
+$("#deps-audit").addEventListener("click", async (e) => {
+  const btn = e.currentTarget;
+  setDepsBusy(btn, true);
+  try {
+    await api("/api/deps/audit", {});
+  } finally {
+    setDepsBusy(btn, false);
+  }
+});
 $$("#deps-scope button").forEach((b) => {
   b.addEventListener("click", () => {
     $$("#deps-scope button").forEach((x) => x.classList.toggle("on", x === b));

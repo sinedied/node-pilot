@@ -147,8 +147,16 @@ export class Controller {
 
   async getSettings(): Promise<ResolvedSettings> {
     const s = await loadSettings(this.cwd);
-    const pinned = s.pinnedScripts == null ? defaultPinnedScripts(this.detection) : s.pinnedScripts;
-    return { theme: s.theme || "auto", pinnedScripts: pinned };
+    if (s.pinnedScripts == null) {
+      // First load: seed the suggested pins and persist them explicitly, but
+      // only once detection is ready — so they become a normal user-owned list
+      // (unpinnable, never re-resolved) rather than a dynamic default. Don't
+      // lock in an empty list before detection lands.
+      const seeded = defaultPinnedScripts(this.detection);
+      if (this.detection?.hasProject) await saveSettings(this.cwd, { pinnedScripts: seeded });
+      return { theme: s.theme || "auto", pinnedScripts: seeded };
+    }
+    return { theme: s.theme || "auto", pinnedScripts: s.pinnedScripts };
   }
 
   async setSettings(patch: SettingsPatch = {}): Promise<ResolvedSettings> {

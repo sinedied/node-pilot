@@ -122,6 +122,30 @@ body {
   flex: none;
 }
 
+/* Spinner: rotate-only (never touch `cursor` — native-host cursor gotcha). */
+.oi.spin {
+  animation: oi-spin 0.7s linear infinite;
+  transform-origin: 50% 50%;
+}
+
+@keyframes oi-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* A button mid-operation shows its spinner and ignores further clicks. */
+.loading {
+  pointer-events: none;
+}
+
+.spin-inline {
+  display: inline-flex;
+  vertical-align: middle;
+  margin-right: 6px;
+  color: var(--accent);
+}
+
 /* ---- Info tab ---- */
 .project {
   display: flex;
@@ -533,12 +557,21 @@ body {
 }
 
 .tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   background: transparent;
   border: none;
   border-bottom: 2px solid transparent;
   color: var(--dim);
   padding: 9px 12px;
   font-weight: 500;
+}
+
+.tabs button .oi {
+  width: 14px;
+  height: 14px;
+  opacity: 0.85;
 }
 
 .tabs button.active {
@@ -706,18 +739,43 @@ main {
   gap: 8px;
 }
 
+#tests-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  gap: 8px;
+}
+
 .suite {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   overflow: hidden;
 }
 
-.suite > .suite-name {
+.suite > .suite-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   padding: 6px 10px;
   background: var(--bg-elev);
   font-family: var(--mono);
   font-size: 12px;
   color: var(--dim);
+}
+
+.suite-head .suite-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.suite-head .suite-meta {
+  flex: none;
+  color: var(--dim);
+  opacity: 0.85;
 }
 
 .test-row {
