@@ -74,3 +74,17 @@ export function isPortInUse(text: string): boolean {
 export function nowIso(): string {
   return new Date().toISOString();
 }
+
+// Human-readable byte size (B / kB / MB / GB, base-1000 to match npm/registry).
+export function formatBytes(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(n)) return "—";
+  if (n < 1000) return `${n} B`;
+  const units = ["kB", "MB", "GB", "TB"];
+  let value = n / 1000;
+  let i = 0;
+  while (value >= 1000 && i < units.length - 1) {
+    value /= 1000;
+    i++;
+  }
+  return `${value.toFixed(value < 10 ? 1 : 0)} ${units[i]}`;
+}

@@ -2,6 +2,7 @@
 // agent and the UI drive exactly the same operations.
 import type { Controller } from "./controller.ts";
 import type { ActionContext, ActionDefinition } from "./types.ts";
+import { formatBytes } from "./util.ts";
 
 function statusSummary(controller: Controller): Record<string, unknown> {
   const d = controller.detection;
@@ -39,6 +40,42 @@ export function buildActions(controller: Controller): ActionDefinition[] {
       description:
         "Get the detected project setup (package manager, framework, tooling) and current lane / dev-server / test status.",
       handler: () => statusSummary(controller),
+    },
+    {
+      name: "get_project_info",
+      description:
+        "Get a project overview: name, version, platform (Node requirement, package manager, module type, license) and dependency/size metrics (direct + total installed deps, install footprint, published package size, build-output size).",
+      handler: async () => {
+        const d = controller.detection;
+        if (!d?.hasProject) return { hasProject: false, reason: d?.reason };
+        const stats = await controller.getProjectStats();
+        const s = "hasProject" in stats ? null : stats;
+        return {
+          hasProject: true,
+          name: d.name,
+          version: d.version,
+          description: d.description,
+          license: d.license,
+          private: d.private,
+          platform: {
+            nodeRequirement: d.engines?.node ?? d.nvmrc ?? null,
+            packageManager: d.packageManagerField || d.pm,
+            moduleType: d.moduleType,
+            runtimeNode: d.runtimeNode,
+          },
+          dependencies: {
+            direct: d.dependencyCount,
+            dev: d.devDependencyCount,
+            totalInstalled: s?.installedCount ?? null,
+          },
+          sizes: {
+            installFootprint: s?.installBytes != null ? formatBytes(s.installBytes) : null,
+            packed: s?.pack ? formatBytes(s.pack.packedBytes) : null,
+            unpacked: s?.pack ? formatBytes(s.pack.unpackedBytes) : null,
+            buildOutput: s?.build ? `${formatBytes(s.build.bytes)} (${s.build.dir})` : null,
+          },
+        };
+      },
     },
     {
       name: "refresh",

@@ -13,6 +13,7 @@ import { parseJestLike, parseTap, parseTextCounts } from "./test-report.ts";
 import { pushCapped, extractUrl, isPortInUse } from "./util.ts";
 import { buildFixPrompt, buildTestFixPrompt } from "./fix.ts";
 import { loadSettings, saveSettings, defaultPinnedScripts } from "./settings.ts";
+import { computeStats } from "./info.ts";
 import * as deps from "./deps.ts";
 import type { SafeUpdateOptions, SafeUpdateResult } from "./deps.ts";
 import type { TestOptions } from "./lanes.ts";
@@ -23,6 +24,7 @@ import type {
   DevState,
   FixContextEntry,
   LaneState,
+  ProjectStats,
   ResolvedSettings,
   SettingsPatch,
   TestReport,
@@ -50,6 +52,8 @@ export class Controller {
   dev: DevState;
   deps: DepsState;
   fixContext: Record<string, FixContextEntry>;
+  projectStats: ProjectStats | null;
+  _statsPromise: Promise<ProjectStats> | null;
 
   constructor(cwd: string, { sendToChat }: ControllerOptions = {}) {
     this.cwd = cwd;
@@ -63,6 +67,8 @@ export class Controller {
     this.dev = { status: "stopped", url: null, port: null, output: [], pid: null, _handle: null };
     this.deps = { outdated: null, audit: null, update: null };
     this.fixContext = {}; // lane -> last failure { command, output, exitCode, report }
+    this.projectStats = null;
+    this._statsPromise = null;
   }
 
   freshLane(id: string): LaneState {
@@ -87,6 +93,7 @@ export class Controller {
 
   async init(): Promise<Detection> {
     this.detection = await detect(this.cwd);
+    this.invalidateStats();
     if (this.detection.hasProject) this.detection.availability = laneAvailability(this.detection);
     this.broadcast({ type: "detection", detection: this.detection });
     return this.detection;
@@ -107,9 +114,33 @@ export class Controller {
 
   async refresh(): Promise<Detection> {
     this.detection = await detect(this.cwd);
+    this.invalidateStats();
     if (this.detection.hasProject) this.detection.availability = laneAvailability(this.detection);
     this.broadcast({ type: "detection", detection: this.detection });
     return this.detection;
+  }
+
+  // ---- Lazy project stats (transitive deps + sizes) -----------------------
+
+  invalidateStats(): void {
+    this.projectStats = null;
+    this._statsPromise = null;
+  }
+
+  // Compute (once) and cache the expensive Info-tab metrics. The npm-pack step
+  // is gated to publishable packages so it isn't run on private apps.
+  getProjectStats(): Promise<ProjectStats | { hasProject: false }> {
+    const d = this.detection;
+    if (!d?.hasProject) return Promise.resolve({ hasProject: false });
+    if (this.projectStats) return Promise.resolve(this.projectStats);
+    if (!this._statsPromise) {
+      this._statsPromise = computeStats(this.cwd, !d.private).then((stats) => {
+        this.projectStats = stats;
+        this._statsPromise = null;
+        return stats;
+      });
+    }
+    return this._statsPromise;
   }
 
   // ---- UI settings (pinned scripts + theme), persisted per project ----------

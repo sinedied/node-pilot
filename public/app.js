@@ -14,7 +14,22 @@ const state = {
   dev: { status: "stopped", url: null, output: "" },
   deps: { outdated: null, audit: null, update: null },
   settings: { theme: "auto", pinnedScripts: [] },
+  stats: null,
 };
+
+// Human-readable byte size (base-1000, matching npm/registry conventions).
+function formatBytes(n) {
+  if (n == null || !Number.isFinite(n)) return "—";
+  if (n < 1000) return `${n} B`;
+  const units = ["kB", "MB", "GB", "TB"];
+  let value = n / 1000;
+  let i = 0;
+  while (value >= 1000 && i < units.length - 1) {
+    value /= 1000;
+    i++;
+  }
+  return `${value.toFixed(value < 10 ? 1 : 0)} ${units[i]}`;
+}
 
 let activeConsoleLane = null;
 const CONSOLE_LANES = new Set(["build", "lint", "format", "typecheck"]);
@@ -77,30 +92,175 @@ function setControlsEnabled(enabled) {
   $$(".segmented button").forEach((b) => (b.disabled = !enabled));
 }
 
+// Build one "label -> value" row for the Platform / Dependencies sections.
+// When `skeleton` is true the value renders as a shimmering placeholder until
+// the lazy stats arrive.
+function infoRow(label, value, { skeleton = false, dim = false } = {}) {
+  const row = document.createElement("div");
+  row.className = "info-row";
+  const l = document.createElement("span");
+  l.className = "info-row-label";
+  l.textContent = label;
+  const v = document.createElement("span");
+  v.className = "info-row-value" + (dim ? " dim" : "");
+  if (skeleton) {
+    v.classList.add("skeleton");
+    v.textContent = "";
+  } else {
+    v.textContent = value;
+  }
+  row.append(l, v);
+  return row;
+}
+
+function infoSection(title, iconId, rows) {
+  const sec = document.createElement("div");
+  sec.className = "info-section";
+  const head = document.createElement("div");
+  head.className = "info-section-head";
+  head.innerHTML = `<svg class="oi"><use href="#oct-${iconId}" /></svg>`;
+  const t = document.createElement("span");
+  t.textContent = title;
+  head.append(t);
+  sec.append(head);
+  for (const r of rows) sec.append(r);
+  return sec;
+}
+
 function renderProject() {
   const d = state.detection;
   const wrap = $("#project");
-  wrap.innerHTML = "";
+  const meta = $("#info-meta");
+  const sections = $("#project-info");
+  const inactive = $("#info-inactive");
+  const body = $("#info-body");
   const notice = $("#notice");
+  const label = $("#info-label");
+  wrap.innerHTML = "";
+  meta.innerHTML = "";
+  sections.innerHTML = "";
+
   if (!d || !d.hasProject) {
-    notice.textContent = d?.reason || "No Node.js project (package.json) found in this folder.";
-    notice.classList.remove("hidden");
+    // The extension is only meaningful with a package.json: show an inactive
+    // empty-state and disable every control.
+    label.textContent = "No project";
+    body.classList.add("hidden");
+    inactive.classList.remove("hidden");
+    const where = d?.cwd ? ` in ${d.cwd}` : "";
+    inactive.innerHTML =
+      `<svg class="oi"><use href="#oct-package" /></svg>` +
+      `<div class="info-inactive-title">Cockpit.js is inactive</div>` +
+      `<div class="info-inactive-sub">No <code>package.json</code> found${where}.</div>`;
+    notice.classList.add("hidden");
     setControlsEnabled(false);
     return;
   }
+
+  inactive.classList.add("hidden");
+  body.classList.remove("hidden");
   notice.classList.add("hidden");
   setControlsEnabled(true);
-  wrap.append(badge(`${d.name}${d.version ? " " + d.version : ""}`));
-  wrap.append(badge(d.pm));
+
+  // Heading: the project name (replaces the old static "Project" label).
+  label.textContent = d.name;
+
+  // Meta line: version, license, private badge, description.
+  if (d.version) meta.append(metaItem(`v${d.version}`));
+  if (d.license) meta.append(metaItem(d.license));
+  if (d.private) meta.append(metaItem("private", true));
+  if (d.description) {
+    const desc = document.createElement("span");
+    desc.className = "info-desc";
+    desc.textContent = d.description;
+    meta.append(desc);
+  }
+
+  // Stack pills (name/version removed — they live in the heading/meta now).
   wrap.append(badge(d.framework.label));
   if (d.typescript) wrap.append(badge("TypeScript"));
   if (d.testRunner) wrap.append(badge(d.testRunner));
+  if (d.playwright) wrap.append(badge("Playwright"));
   if (d.linter) wrap.append(badge(d.linter));
+  if (d.formatter) wrap.append(badge(d.formatter));
   if (d.workspaces) wrap.append(badge("workspaces", true));
+
+  // Platform section.
+  const nodeReq = (d.engines && d.engines.node) || d.nvmrc || "any";
+  const platformRows = [
+    infoRow("Node", nodeReq),
+    infoRow("Package manager", d.packageManagerField || d.pm),
+    infoRow("Module type", d.moduleType),
+    infoRow("License", d.license || "—"),
+    infoRow("Runtime", d.runtimeNode, { dim: true }),
+  ];
+  sections.append(infoSection("Platform", "gear", platformRows));
+
+  // Dependencies section (cheap rows now, size/transitive rows lazy-loaded).
+  const depsRows = [
+    infoRow("Direct", `${d.dependencyCount} prod · ${d.devDependencyCount} dev`),
+    infoRow("Installed (total)", "", { skeleton: true }),
+    infoRow("Install footprint", "", { skeleton: true }),
+    infoRow("Package size", "", { skeleton: true }),
+    infoRow("Build output", "", { skeleton: true }),
+    infoRow("Scripts", String((d.scriptNames || []).length)),
+  ];
+  const depsSection = infoSection("Dependencies", "package", depsRows);
+  sections.append(depsSection);
+  // The four lazy rows that loadStats fills in once stats arrive.
+  const lazyRows = {
+    installed: depsRows[1].querySelector(".info-row-value"),
+    footprint: depsRows[2].querySelector(".info-row-value"),
+    pack: depsRows[3].querySelector(".info-row-value"),
+    build: depsRows[4].querySelector(".info-row-value"),
+  };
 
   renderLanes();
   renderTabs();
   renderPinned();
+  loadStats(lazyRows, d);
+}
+
+function metaItem(text, badgeStyle) {
+  const s = document.createElement("span");
+  s.className = badgeStyle ? "info-meta-badge" : "info-meta-item";
+  s.textContent = text;
+  return s;
+}
+
+function fillStatRow(el, value) {
+  if (!el) return;
+  el.classList.remove("skeleton");
+  el.textContent = value;
+}
+
+// Lazily fetch the expensive metrics (transitive count + sizes) and fill the
+// skeleton rows. Cached on state.stats; Refresh clears the cache to recompute.
+async function loadStats(rows, detection) {
+  let stats = state.stats;
+  if (!stats) {
+    stats = await api("/api/info/stats", {});
+    // Detection may have changed (or gone) while the request was in flight.
+    if (state.detection !== detection) return;
+    if (stats && stats.hasProject === false) return;
+    state.stats = stats;
+  }
+  fillStatRow(rows.installed, stats.installedCount != null ? String(stats.installedCount) : "—");
+  fillStatRow(
+    rows.footprint,
+    stats.installBytes != null ? formatBytes(stats.installBytes) : "not installed",
+  );
+  if (stats.pack) {
+    fillStatRow(
+      rows.pack,
+      `${formatBytes(stats.pack.packedBytes)} packed · ${formatBytes(stats.pack.unpackedBytes)} unpacked`,
+    );
+  } else {
+    fillStatRow(rows.pack, detection.private ? "— (private)" : "—");
+  }
+  fillStatRow(
+    rows.build,
+    stats.build ? `${formatBytes(stats.build.bytes)} (${stats.build.dir})` : "not built",
+  );
 }
 
 // Show only the lane buttons that apply to this project.
@@ -428,6 +588,7 @@ function applyEvent(e) {
       break;
     case "detection":
       state.detection = e.detection;
+      state.stats = null;
       renderProject();
       refreshSettings();
       break;

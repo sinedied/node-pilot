@@ -3,10 +3,12 @@
 - [x] rename to cockpit.js
 - [x] cursor icon bug hover, flashing between regular and pointer icons
 - [x] move toolbar to "Info" tab, with refresh and theme there. Should be first tab.
-
-- [ ] in the info tab, instead of "Project" show the found project name in package.json. The project name then should be removed from the list of pills.
+- [x] in the info tab, instead of "Project" show the found project name in package.json. The project name then should be removed from the list of pills.
 Instead of pills, extract proper information about the project. Suggest useful info that could be displayed here, in addition to the "stack" pills, like number of dependencies with total number of included dependencies with transitives, bundle size etc. Platform (min Node.js version, package manager, etc). This extension activation relies on the presence of a package.json, so if none is present show a message that the extension is not active because no package.json was found. 
 
+- [ ] UI: spinner when running/loading
+
+- [ ] icons for tabs
 - [ ] no disctinction in pinned script, default pinned scripts can be unpinned too
 
 - [ ] dogfood all features
@@ -14,6 +16,10 @@ Instead of pills, extract proper information about the project. Suggest useful i
 
 - [ ] test panel: missing spacing
 
+  * language server TS
+  * lint errors
+  * debugger?
+  * integrated browser + screen capture + playwright integration
 
 - [ ] add skills (README for example)
 - [ ] logo

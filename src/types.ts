@@ -42,12 +42,33 @@ export interface ProjectDetection {
   engines: Record<string, string> | null;
   nvmrc: string | null;
   runtimeNode: string;
+  moduleType: "ESM" | "CommonJS";
+  license: string | null;
+  private: boolean;
+  description: string | null;
   dependencyCount: number;
   devDependencyCount: number;
   availability?: LaneAvailability;
 }
-
 export type Detection = NoProjectDetection | ProjectDetection;
+
+// ---- Project stats (lazy: transitive deps + sizes) ------------------------
+
+export interface PackStats {
+  packedBytes: number;
+  unpackedBytes: number;
+  entryCount: number;
+}
+export interface BuildStats {
+  dir: string;
+  bytes: number;
+}
+export interface ProjectStats {
+  installedCount: number | null;
+  installBytes: number | null;
+  pack: PackStats | null;
+  build: BuildStats | null;
+}
 
 // ---- Lanes ----------------------------------------------------------------
 

@@ -75,7 +75,8 @@ Node ≥ 22.18 (native type-stripping) and the UI is plain HTML/CSS/JS.
 ### In the canvas
 
 Open the **Cockpit.js** canvas in the side panel. The status bar shows the detected
-setup; the tabs give you **Info** (project overview + refresh / theme), **Console**
+setup; the tabs give you **Info** (project overview — stack, platform and
+dependency/size metrics — plus refresh / theme), **Console**
 (scripts + build/lint/format/type-check), **Tests**, **Dev** (server + preview) and
 **Dependencies** (outdated / audit / safe update). Every failing run offers **Fix with
 Copilot**.
@@ -86,9 +87,9 @@ Copilot can drive the same operations through canvas actions, e.g. _"build the a
 _"run the tests"_, _"start the dev server"_, _"update all patch-level dependencies
 safely"\_. Available actions:
 
-`get_status` · `refresh` · `run_script` · `build_app` · `lint` · `format` ·
-`typecheck` · `run_tests` · `start_dev` · `stop_dev` · `get_dev_url` · `get_logs` ·
-`list_outdated` · `audit` · `update_dependencies` · `rollback_last_update` ·
+`get_status` · `get_project_info` · `refresh` · `run_script` · `build_app` · `lint` ·
+`format` · `typecheck` · `run_tests` · `start_dev` · `stop_dev` · `get_dev_url` ·
+`get_logs` · `list_outdated` · `audit` · `update_dependencies` · `rollback_last_update` ·
 `fix_issue`.
 
 ### Safe dependency updates

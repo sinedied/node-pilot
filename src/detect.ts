@@ -14,6 +14,10 @@ interface PackageJson {
   devDependencies?: Record<string, string>;
   workspaces?: unknown;
   engines?: Record<string, string>;
+  type?: string;
+  license?: unknown;
+  private?: boolean;
+  description?: string;
 }
 
 function detectPm(cwd: string, pkg: PackageJson): PackageManager {
@@ -167,6 +171,10 @@ export async function detect(cwd: string): Promise<Detection> {
     engines: pkg.engines || null,
     nvmrc,
     runtimeNode: process.version,
+    moduleType: pkg.type === "module" ? "ESM" : "CommonJS",
+    license: typeof pkg.license === "string" ? pkg.license : null,
+    private: pkg.private === true,
+    description: typeof pkg.description === "string" ? pkg.description : null,
     dependencyCount: Object.keys(pkg.dependencies || {}).length,
     devDependencyCount: Object.keys(pkg.devDependencies || {}).length,
   };

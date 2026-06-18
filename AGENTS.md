@@ -20,7 +20,8 @@ inspiration: [coffilot](https://github.com/jdubois/coffilot). Full design in
 - `src/` — TypeScript, SDK-free and unit-testable with plain Node:
   - `types.ts` (shared domain types), `detect.ts` (pm/scripts/framework/TS/runners),
     `pm.ts`, `process-runner.ts` (cross-platform spawn), `lanes.ts`, `test-report.ts`,
-    `deps.ts` (safe-update loop + rollback), `controller.ts` (central state + SSE
+    `deps.ts` (safe-update loop + rollback), `info.ts` (lazy Info-tab metrics:
+    transitive deps + sizes), `controller.ts` (central state + SSE
     events), `server.ts` (http + SSE + `/api/*`), `actions.ts` (agent actions),
     `fix.ts` (prompt builders), `settings.ts` (per-project pinned scripts + theme).
 - `types/copilot-sdk.d.ts` — ambient shim for `@github/copilot-sdk/extension` so `tsc`

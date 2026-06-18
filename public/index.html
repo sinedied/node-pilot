@@ -178,7 +178,7 @@
       <!-- Info -->
       <section id="tab-info" class="tab-panel active">
         <div class="panel-head">
-          <span id="info-label" class="mono dim">Project</span>
+          <span id="info-label" class="info-name">Project</span>
           <span class="grow"></span>
           <button
             id="refresh"
@@ -192,7 +192,12 @@
             <svg class="oi"><use href="#oct-device-desktop" /></svg>
           </button>
         </div>
-        <div id="project" class="project"></div>
+        <div id="info-inactive" class="info-inactive hidden"></div>
+        <div id="info-body">
+          <div id="info-meta" class="info-meta"></div>
+          <div id="project" class="project"></div>
+          <div id="project-info" class="info-sections"></div>
+        </div>
       </section>
 
       <!-- Console -->
