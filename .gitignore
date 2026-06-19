@@ -8,3 +8,5 @@ dist/
 coverage/
 *.tsbuildinfo
 .cockpit/
+.astro/
+docs/site/dist/

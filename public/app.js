@@ -4,6 +4,7 @@
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
+// biome-ignore lint/suspicious/noControlCharactersInRegex: intentionally matches ANSI escape sequences to strip them
 const ANSI = /\x1b\[[0-9;]*m/g;
 const strip = (s) => (s || "").replace(ANSI, "");
 
@@ -87,9 +88,13 @@ function badge(text, muted) {
 }
 
 function setControlsEnabled(enabled) {
-  $$(".lane-btn").forEach((b) => (b.disabled = !enabled));
+  $$(".lane-btn").forEach((b) => {
+    b.disabled = !enabled;
+  });
   $("#scripts-toggle").disabled = !enabled;
-  $$(".segmented button").forEach((b) => (b.disabled = !enabled));
+  $$(".segmented button").forEach((b) => {
+    b.disabled = !enabled;
+  });
 }
 
 // ---- Loading indicators ---------------------------------------------------
@@ -140,9 +145,9 @@ function taskStatusId(btn) {
 
 // Reflect running tasks as spinning, click-blocked buttons. Idempotent.
 function renderRunning() {
-  $$("#pinned .lane-btn[data-task-type]").forEach((b) =>
-    setBtnLoading(b, isRunning(taskStatusId(b))),
-  );
+  $$("#pinned .lane-btn[data-task-type]").forEach((b) => {
+    setBtnLoading(b, isRunning(taskStatusId(b)));
+  });
 }
 
 // Dependency action buttons: spinner on the active one, disable its siblings.
@@ -163,7 +168,7 @@ function infoRow(label, value, { skeleton = false, dim = false } = {}) {
   l.className = "info-row-label";
   l.textContent = label;
   const v = document.createElement("span");
-  v.className = "info-row-value" + (dim ? " dim" : "");
+  v.className = `info-row-value${dim ? " dim" : ""}`;
   if (skeleton) {
     v.classList.add("skeleton");
     v.textContent = "";
@@ -201,7 +206,7 @@ function renderProject() {
   meta.innerHTML = "";
   sections.innerHTML = "";
 
-  if (!d || !d.hasProject) {
+  if (!d?.hasProject) {
     // The extension is only meaningful with a package.json: show an inactive
     // empty-state and disable every control.
     label.textContent = "No project";
@@ -246,7 +251,7 @@ function renderProject() {
   if (d.workspaces) wrap.append(badge("workspaces", true));
 
   // Platform section.
-  const nodeReq = (d.engines && d.engines.node) || d.nvmrc || "any";
+  const nodeReq = d.engines?.node || d.nvmrc || "any";
   const platformRows = [
     infoRow("Node", nodeReq),
     infoRow("Package manager", d.packageManagerField || d.pm),
@@ -330,7 +335,7 @@ function renderTabs() {
   $("#tabbtn-tests").classList.toggle("hidden", hasProject && a.test === false);
   $("#tabbtn-dev").classList.toggle("hidden", hasProject && a.dev === false);
   const active = $(".tabs button.active");
-  if (active && active.classList.contains("hidden")) showTab("console");
+  if (active?.classList.contains("hidden")) showTab("console");
 }
 
 // ---- Tasks (unified pinned lanes + scripts) -------------------------------
@@ -445,7 +450,7 @@ function renderScriptsMenu() {
 
 async function togglePin(task, pin) {
   const key = taskKey(task);
-  let next = (state.settings.pinnedTasks || []).filter((p) => taskKey(p) !== key);
+  const next = (state.settings.pinnedTasks || []).filter((p) => taskKey(p) !== key);
   if (pin) next.push(task);
   state.settings.pinnedTasks = next;
   renderPinned();
@@ -520,14 +525,14 @@ const TEST_ICON = {
 function relPath(p) {
   if (!p) return p;
   const cwd = state.detection?.cwd;
-  if (cwd && (p === cwd || p.startsWith(cwd + "/"))) {
+  if (cwd && (p === cwd || p.startsWith(`${cwd}/`))) {
     return p.slice(cwd.length + 1) || p;
   }
   return p.split("/").pop() || p;
 }
 
 function fmtDuration(ms) {
-  if (ms == null || !isFinite(ms)) return null;
+  if (ms == null || !Number.isFinite(ms)) return null;
   return ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(2)}s`;
 }
 
@@ -770,7 +775,8 @@ function applyEvent(e) {
       break;
     }
     case "lane:data": {
-      const lane = (state.lanes[e.lane] = state.lanes[e.lane] || { id: e.lane, output: "" });
+      state.lanes[e.lane] = state.lanes[e.lane] || { id: e.lane, output: "" };
+      const lane = state.lanes[e.lane];
       lane.output = (lane.output || "") + e.chunk;
       if (e.lane === activeConsoleLane) {
         const c = $("#console");
@@ -780,7 +786,8 @@ function applyEvent(e) {
       break;
     }
     case "lane:end": {
-      const lane = (state.lanes[e.lane] = state.lanes[e.lane] || { id: e.lane });
+      state.lanes[e.lane] = state.lanes[e.lane] || { id: e.lane };
+      const lane = state.lanes[e.lane];
       lane.status = e.status;
       lane.exitCode = e.exitCode;
       if (e.lane === activeConsoleLane) renderConsoleStatus();
@@ -823,11 +830,13 @@ function applyEvent(e) {
       renderUpdate();
       break;
     case "deps:update-log":
-      (state.deps.update = state.deps.update || { log: [] }).log.push(e.chunk);
+      state.deps.update = state.deps.update || { log: [] };
+      state.deps.update.log.push(e.chunk);
       renderUpdate();
       break;
     case "deps:update-done":
-      Object.assign((state.deps.update = state.deps.update || { log: [] }), {
+      state.deps.update = state.deps.update || { log: [] };
+      Object.assign(state.deps.update, {
         status: "done",
         kept: e.kept,
         failed: e.failed,
@@ -871,7 +880,7 @@ $("#scripts-toggle").addEventListener("click", (e) => {
 });
 document.addEventListener("click", (e) => {
   const target = /** @type {Element | null} */ (e.target);
-  if (!target || !target.closest(".menu-wrap")) closeScriptsMenu();
+  if (!target?.closest(".menu-wrap")) closeScriptsMenu();
 });
 
 $("#console-fix").addEventListener("click", (e) =>
@@ -884,6 +893,7 @@ $("#dev-start").addEventListener("click", () => api("/api/dev/start", {}));
 $("#dev-stop").addEventListener("click", () => api("/api/dev/stop", {}));
 $("#dev-reload").addEventListener("click", () => {
   const p = $("#dev-preview");
+  // biome-ignore lint/correctness/noSelfAssign: reassigning iframe.src to the same URL forces a reload
   if (p.src) p.src = p.src;
 });
 
@@ -907,7 +917,9 @@ $("#deps-audit").addEventListener("click", async (e) => {
 });
 $$("#deps-scope button").forEach((b) => {
   b.addEventListener("click", () => {
-    $$("#deps-scope button").forEach((x) => x.classList.toggle("on", x === b));
+    $$("#deps-scope button").forEach((x) => {
+      x.classList.toggle("on", x === b);
+    });
   });
 });
 $("#deps-update").addEventListener("click", () =>

@@ -25,6 +25,7 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
   res.end(data);
 }
 
+// biome-ignore lint/suspicious/noExplicitAny: request bodies are arbitrary JSON, narrowed per-route below
 function readBody(req: IncomingMessage): Promise<any> {
   return new Promise((resolve) => {
     let data = "";

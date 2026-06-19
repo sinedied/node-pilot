@@ -8,7 +8,7 @@
     <link rel="stylesheet" href="/style.css" />
   </head>
   <body>
-    <!-- Octicon sprite (Octicons by GitHub, MIT). Used via <svg class="oi"><use href="#oct-..."/></svg>. -->
+    <!-- Octicon sprite (Octicons by GitHub, MIT). Used via <svg class="oi" aria-hidden="true"><use href="#oct-..."/></svg>. -->
     <svg width="0" height="0" class="sprite" aria-hidden="true" focusable="false">
       <symbol id="oct-sync" viewBox="0 0 16 16">
         <path
@@ -148,8 +148,8 @@
     <nav class="toolbar" id="toolbar">
       <span id="pinned" class="pinned"></span>
       <div class="menu-wrap">
-        <button id="scripts-toggle" class="lane-btn" aria-haspopup="true" aria-expanded="false">
-          <svg class="oi"><use href="#oct-terminal" /></svg>Tasks<span class="caret"></span>
+        <button type="button" id="scripts-toggle" class="lane-btn" aria-haspopup="true" aria-expanded="false">
+          <svg class="oi" aria-hidden="true"><use href="#oct-terminal" /></svg>Tasks<span class="caret"></span>
         </button>
         <div id="scripts-menu" class="popover hidden" role="menu"></div>
       </div>
@@ -159,20 +159,20 @@
     </div>
 
     <div class="tabs" id="tabs">
-      <button data-tab="info" class="active">
-        <svg class="oi"><use href="#oct-info" /></svg>Info
+      <button type="button" data-tab="info" class="active">
+        <svg class="oi" aria-hidden="true"><use href="#oct-info" /></svg>Info
       </button>
-      <button data-tab="console">
-        <svg class="oi"><use href="#oct-terminal" /></svg>Console
+      <button type="button" data-tab="console">
+        <svg class="oi" aria-hidden="true"><use href="#oct-terminal" /></svg>Console
       </button>
-      <button data-tab="tests" id="tabbtn-tests">
-        <svg class="oi"><use href="#oct-beaker" /></svg>Tests
+      <button type="button" data-tab="tests" id="tabbtn-tests">
+        <svg class="oi" aria-hidden="true"><use href="#oct-beaker" /></svg>Tests
       </button>
-      <button data-tab="dev" id="tabbtn-dev">
-        <svg class="oi"><use href="#oct-server" /></svg>Dev
+      <button type="button" data-tab="dev" id="tabbtn-dev">
+        <svg class="oi" aria-hidden="true"><use href="#oct-server" /></svg>Dev
       </button>
-      <button data-tab="deps">
-        <svg class="oi"><use href="#oct-package" /></svg>Dependencies
+      <button type="button" data-tab="deps">
+        <svg class="oi" aria-hidden="true"><use href="#oct-package" /></svg>Dependencies
       </button>
     </div>
 
@@ -182,16 +182,16 @@
         <div class="panel-head">
           <span id="info-label" class="info-name">Project</span>
           <span class="grow"></span>
-          <button
+          <button type="button"
             id="refresh"
             class="icon-btn"
             title="Re-run project detection"
             aria-label="Refresh"
           >
-            <svg class="oi"><use href="#oct-sync" /></svg>
+            <svg class="oi" aria-hidden="true"><use href="#oct-sync" /></svg>
           </button>
-          <button id="theme-toggle" class="icon-btn" title="Theme: auto" aria-label="Toggle theme">
-            <svg class="oi"><use href="#oct-device-desktop" /></svg>
+          <button type="button" id="theme-toggle" class="icon-btn" title="Theme: auto" aria-label="Toggle theme">
+            <svg class="oi" aria-hidden="true"><use href="#oct-device-desktop" /></svg>
           </button>
         </div>
         <div id="info-inactive" class="info-inactive hidden"></div>
@@ -208,8 +208,8 @@
           <span id="console-label" class="mono dim">Run a task to see output here.</span>
           <span class="grow"></span>
           <span id="console-status" class="status-chip"></span>
-          <button id="console-fix" class="fix-btn hidden">
-            <svg class="oi"><use href="#oct-copilot" /></svg>Fix with Copilot
+          <button type="button" id="console-fix" class="fix-btn hidden">
+            <svg class="oi" aria-hidden="true"><use href="#oct-copilot" /></svg>Fix with Copilot
           </button>
         </div>
         <pre id="console" class="console"></pre>
@@ -222,10 +222,10 @@
           <div class="panel-head">
             <div id="test-chips" class="chips"></div>
             <span class="grow"></span>
-            <button id="test-fix" class="fix-btn hidden">
-              <svg class="oi"><use href="#oct-copilot" /></svg>Fix with Copilot
+            <button type="button" id="test-fix" class="fix-btn hidden">
+              <svg class="oi" aria-hidden="true"><use href="#oct-copilot" /></svg>Fix with Copilot
             </button>
-            <button id="test-raw-toggle" class="ghost-btn">Raw output</button>
+            <button type="button" id="test-raw-toggle" class="ghost-btn">Raw output</button>
           </div>
           <div id="test-suites" class="suites"></div>
           <pre id="test-raw" class="console hidden"></pre>
@@ -235,21 +235,22 @@
       <!-- Dev -->
       <section id="tab-dev" class="tab-panel" hidden>
         <div class="panel-head">
-          <button id="dev-start" class="lane-btn primary">
-            <svg class="oi"><use href="#oct-play" /></svg>Start dev server
+          <button type="button" id="dev-start" class="lane-btn primary">
+            <svg class="oi" aria-hidden="true"><use href="#oct-play" /></svg>Start dev server
           </button>
-          <button id="dev-stop" class="lane-btn hidden">
-            <svg class="oi"><use href="#oct-square-fill" /></svg>Stop
+          <button type="button" id="dev-stop" class="lane-btn hidden">
+            <svg class="oi" aria-hidden="true"><use href="#oct-square-fill" /></svg>Stop
           </button>
           <span id="dev-url-wrap" class="dev-url hidden">
-            <a id="dev-url" href="#" target="_blank" rel="noreferrer"></a>
-            <button
+            <!-- biome-ignore lint/a11y/useValidAnchor: href is set at runtime to the detected dev-server URL -->
+            <a id="dev-url" href="#" target="_blank" rel="noreferrer">Open app</a>
+            <button type="button"
               id="dev-reload"
               class="icon-btn"
               title="Reload preview"
               aria-label="Reload preview"
             >
-              <svg class="oi"><use href="#oct-sync" /></svg>
+              <svg class="oi" aria-hidden="true"><use href="#oct-sync" /></svg>
             </button>
           </span>
           <span class="grow"></span>
@@ -264,24 +265,25 @@
       <!-- Dependencies -->
       <section id="tab-deps" class="tab-panel" hidden>
         <div class="panel-head wrap">
-          <button id="deps-check" class="lane-btn">
-            <svg class="oi"><use href="#oct-package" /></svg>Check outdated
+          <button type="button" id="deps-check" class="lane-btn">
+            <svg class="oi" aria-hidden="true"><use href="#oct-package" /></svg>Check outdated
           </button>
-          <button id="deps-audit" class="lane-btn">
-            <svg class="oi"><use href="#oct-shield-check" /></svg>Audit
+          <button type="button" id="deps-audit" class="lane-btn">
+            <svg class="oi" aria-hidden="true"><use href="#oct-shield-check" /></svg>Audit
           </button>
           <span class="grow"></span>
           <span class="field-label">Scope</span>
+          <!-- biome-ignore lint/a11y/useSemanticElements: styled segmented button group, not a fieldset -->
           <div class="segmented" id="deps-scope" role="group" aria-label="Update scope">
             <button type="button" data-scope="patch">patch</button>
             <button type="button" data-scope="minor" class="on">minor</button>
             <button type="button" data-scope="major">major</button>
           </div>
-          <button id="deps-update" class="lane-btn primary">
-            <svg class="oi"><use href="#oct-versions" /></svg>Safe update
+          <button type="button" id="deps-update" class="lane-btn primary">
+            <svg class="oi" aria-hidden="true"><use href="#oct-versions" /></svg>Safe update
           </button>
-          <button id="deps-fix" class="fix-btn hidden">
-            <svg class="oi"><use href="#oct-copilot" /></svg>Fix with Copilot
+          <button type="button" id="deps-fix" class="fix-btn hidden">
+            <svg class="oi" aria-hidden="true"><use href="#oct-copilot" /></svg>Fix with Copilot
           </button>
         </div>
         <div id="audit-summary" class="audit hidden"></div>

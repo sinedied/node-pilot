@@ -54,8 +54,16 @@ export function classifyBump(
 
 // ---- outdated parsing -----------------------------------------------------
 
+interface NpmOutdatedInfo {
+  current?: string;
+  wanted?: string;
+  latest?: string;
+  type?: string;
+  dependent?: string;
+}
+
 function parseNpmOutdated(text: string): OutdatedEntry[] {
-  let json: Record<string, any>;
+  let json: Record<string, NpmOutdatedInfo>;
   try {
     json = JSON.parse(text || "{}");
   } catch {
@@ -126,8 +134,20 @@ export async function listOutdated(controller: Controller): Promise<OutdatedResu
 
 // ---- audit ----------------------------------------------------------------
 
+interface AuditVulnRaw {
+  severity?: string;
+  range?: string | null;
+  fixAvailable?: unknown;
+  via?: Array<string | { title?: string; name?: string }>;
+}
+
+interface NpmAuditJson {
+  metadata?: { vulnerabilities?: Record<string, number> };
+  vulnerabilities?: Record<string, AuditVulnRaw>;
+}
+
 function parseAudit(text: string): AuditResult {
-  let json: Record<string, any>;
+  let json: NpmAuditJson;
   try {
     json = JSON.parse(text || "{}");
   } catch {
@@ -136,14 +156,14 @@ function parseAudit(text: string): AuditResult {
   const meta = json.metadata?.vulnerabilities || null;
   const vulns: AuditResult["vulnerabilities"] = [];
   if (json.vulnerabilities) {
-    for (const [name, v] of Object.entries<any>(json.vulnerabilities)) {
+    for (const [name, v] of Object.entries(json.vulnerabilities)) {
       vulns.push({
         name,
         severity: v.severity || "unknown",
         range: v.range || null,
         fixAvailable: Boolean(v.fixAvailable),
         via: Array.isArray(v.via)
-          ? v.via.map((x: any) => (typeof x === "string" ? x : x.title || x.name)).filter(Boolean)
+          ? v.via.map((x) => (typeof x === "string" ? x : x.title || x.name || "")).filter(Boolean)
           : [],
       });
     }
@@ -362,7 +382,7 @@ export async function safeUpdate(
 
   // Attempt 1: all together.
   log("▶ Applying all updates together…\n");
-  let res = await applyAndVerify(controller, targets, devSet, steps, log);
+  const res = await applyAndVerify(controller, targets, devSet, steps, log);
   if (res.ok) {
     log("\n✓ All updates applied and verified.\n");
     await listOutdated(controller).catch(() => {});

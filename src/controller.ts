@@ -312,7 +312,8 @@ export class Controller {
     if (!d?.hasProject) return { ok: false, reason: "No Node.js project detected." };
     if (!d.scripts[name]) return { ok: false, reason: `No "${name}" script in package.json.` };
     const id = `script:${name}`;
-    const lane = (this.lanes[id] = this.lanes[id] || this.freshLane(id));
+    this.lanes[id] = this.lanes[id] || this.freshLane(id);
+    const lane = this.lanes[id];
     if (lane.status === "running")
       return { ok: false, reason: `Script ${name} is already running.` };
     const argv = pmRunScript(d.pm, name);

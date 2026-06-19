@@ -130,7 +130,9 @@ types/copilot-sdk.d.ts   ambient SDK shim (so tsc resolves the SDK in CI)
 public/                  index.html · app.js · style.css (Primer-styled vanilla UI)
 test/                    Vitest specs · scripts/smoke.mjs (type-stripping load)
 tsconfig*.json           Node + browser (checkJs) type-check configs
-.github/workflows/ci.yml CI: format → build → smoke → test on Node 22.18 & 24
+biome.json               Biome lint + format config
+docs/site/                Astro + Starlight docs site (dogfoods the Dev / web Build lanes)
+.github/workflows/ci.yml CI: biome → build → smoke → test on Node 22.18 & 24
 ```
 
 The toolbar is a single row of **pinned tasks** — built-in lanes (Build, Type-check,
@@ -155,13 +157,18 @@ Requires **Node ≥ 22.18** (for native TypeScript type-stripping — the backen
 
 ```sh
 npm install
-npm run check          # format:check + build + smoke + test (everything CI runs)
+npm run check          # biome (lint + format) + build + smoke + test (everything CI runs)
 
 npm run build          # tsc type-check (Node + browser configs); alias: npm run typecheck
 npm run smoke          # load every SDK-free module via native type-stripping
 npm test               # Vitest unit tests (npm run test:watch / npm run coverage)
-npm run format         # format with Prettier (npm run format:check to verify)
+npm run lint           # Biome lint (npm run lint:fix to autofix)
+npm run format         # format with Biome (npm run format:check to verify)
 ```
+
+This repo also dogfoods Cockpit's **Dev** and web **Build** lanes with an Astro +
+Starlight docs site under `docs/site/`: `npm run dev` starts it (auto-detected, served at
+`http://localhost:4321/`) and `npm run docs:build` builds it.
 
 After editing the extension, reload it in the Copilot app (the runtime rediscovers
 `.github/extensions/`) to pick up changes.

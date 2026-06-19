@@ -177,14 +177,14 @@ cockpit/
     index.html  app.js  style.css   # themed vanilla UI
   .github/extensions/cockpit/extension.mjs   # dog-food wrapper -> root extension.mjs
   copilot-extension.json            # { "name": "cockpit", "version": 1 }
-  package.json                      # metadata + check/format scripts + prettier
-  README.md  PLAN.md  LICENSE  .gitignore  prettier.config.cjs
+  package.json                      # metadata + check/lint/format scripts + biome
+  README.md  PLAN.md  LICENSE  .gitignore  biome.json
 ```
 
 ## Milestones (tracked in SQL)
 
 1. **Repo scaffolding** — standalone repo files, manifest, `package.json`, dog-food
-   wrapper, prettier, gitignore, README skeleton, git init.
+   wrapper, biome, gitignore, README skeleton, git init.
 2. **Canvas + server skeleton** — `createCanvas`, loopback HTTP server, SSE stream,
    static UI shell, `open` / `onClose`.
 3. **Project detection** — PM, scripts, frameworks, TS, test runner, workspaces,

@@ -24,7 +24,6 @@ export function runScript(pm: PackageManager, name: string, extraArgs: string[] 
       return ["yarn", "run", name, ...extraArgs];
     case "bun":
       return ["bun", "run", name, ...extraArgs];
-    case "npm":
     default:
       return ["npm", "run", name, ...(extraArgs.length ? ["--", ...extraArgs] : [])];
   }
@@ -39,7 +38,6 @@ export function exec(pm: PackageManager, binArgs: string[]): string[] {
       return ["yarn", "exec", "--", ...binArgs];
     case "bun":
       return ["bun", "x", ...binArgs];
-    case "npm":
     default:
       return ["npm", "exec", "--", ...binArgs];
   }
@@ -54,7 +52,6 @@ export function install(pm: PackageManager): string[] {
       return ["yarn", "install"];
     case "bun":
       return ["bun", "install"];
-    case "npm":
     default:
       return ["npm", "install"];
   }
@@ -70,7 +67,6 @@ export function add(pm: PackageManager, specs: string[], { dev = false } = {}): 
       return ["yarn", "add", ...(dev ? ["-D"] : []), ...specs];
     case "bun":
       return ["bun", "add", ...(dev ? ["-d"] : []), ...specs];
-    case "npm":
     default:
       return ["npm", "install", ...(dev ? ["--save-dev"] : []), ...specs];
   }
@@ -102,7 +98,6 @@ export function audit(pm: PackageManager): AuditCommand {
       return { argv: ["yarn", "npm", "audit", "--json"], format: "yarn-json" };
     case "bun":
       return { argv: ["bun", "audit", "--json"], format: "npm-json" };
-    case "npm":
     default:
       return { argv: ["npm", "audit", "--json"], format: "npm-json" };
   }
@@ -114,7 +109,6 @@ export function auditFix(pm: PackageManager): string[] {
       return ["pnpm", "audit", "--fix"];
     case "yarn":
       return ["yarn", "npm", "audit", "--fix"];
-    case "npm":
     default:
       return ["npm", "audit", "fix"];
   }
@@ -128,7 +122,6 @@ export function lockfileFor(pm: PackageManager): string {
       return "yarn.lock";
     case "bun":
       return "bun.lockb";
-    case "npm":
     default:
       return "package-lock.json";
   }

@@ -8,6 +8,7 @@ function emptyReport(): TestReport {
 }
 
 // Vitest's JSON reporter mirrors Jest's, so one parser handles both.
+// biome-ignore lint/suspicious/noExplicitAny: parses arbitrary external Jest/Vitest report JSON
 export function parseJestLike(json: any): TestReport {
   const report = emptyReport();
   const results = Array.isArray(json?.testResults) ? json.testResults : [];
@@ -84,7 +85,7 @@ export function parseTap(text: string): TestReport {
     }
     // Capture indented YAML diagnostics under a failing assertion as a message.
     if (pendingFail && /^\s+/.test(line)) {
-      pendingFail.message = (pendingFail.message || "") + line + "\n";
+      pendingFail.message = `${(pendingFail.message || "") + line}\n`;
     } else {
       pendingFail = null;
     }

@@ -1,0 +1,42 @@
+---
+title: Cockpit.js
+description: The JavaScript / Node.js / web inner-loop console for the GitHub Copilot app.
+template: splash
+hero:
+  tagline: Run, build, lint, test, preview and update dependencies — without ever leaving the Copilot side panel.
+  actions:
+    - text: Get started
+      link: /install/
+      icon: right-arrow
+      variant: primary
+    - text: View on GitHub
+      link: https://github.com/sinedied/node-pilot
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid } from "@astrojs/starlight/components";
+
+**Cockpit.js** is a [Copilot canvas extension](https://docs.github.com/en/copilot/how-tos/github-copilot-app/working-with-canvas-extensions)
+that puts your project's whole inner loop in the Copilot side panel. It is
+zero-config: it auto-detects your package manager, scripts, framework, test
+runner, linter, formatter and TypeScript, and degrades gracefully when a
+capability is missing.
+
+<CardGrid stagger>
+  <Card title="Run everything" icon="rocket">
+    Scripts, build, lint, format, type-check and test — each with streamed output.
+  </Card>
+  <Card title="Dev & preview" icon="laptop">
+    Start the dev server, auto-detect the served URL, and preview the app inline.
+  </Card>
+  <Card title="Safe updates" icon="approve-check">
+    Update dependencies with an automatic verify-and-rollback loop.
+  </Card>
+  <Card title="Fix with Copilot" icon="seti:todo">
+    Hand any failure straight to the agent with one click.
+  </Card>
+</CardGrid>
+
+> This docs site is itself built and previewed **through Cockpit.js** — the
+> project dogfoods its own Dev and Build lanes.

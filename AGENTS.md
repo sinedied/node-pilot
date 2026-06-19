@@ -31,9 +31,17 @@ inspiration: [coffilot](https://github.com/jdubois/coffilot). Full design in
   `public/app.js` stays JS, type-checked via `tsconfig.client.json` (`checkJs`).
 - `test/` — Vitest specs (`core.test.ts`, `deps.test.ts`). `scripts/smoke.mjs`
   dynamically imports every SDK-free `src/*.ts` to prove native type-stripping loads.
+- `biome.json` — Biome config (lint + format, replaces Prettier). `noImportantStyles`
+  is off (the cursor/spinner `!important` rules are deliberate, see gotcha below).
+- `docs/site/` — a self-contained Astro + Starlight docs site (its own
+  `astro.config.mjs` + `src/`), run via `astro --root docs/site`, so it never
+  touches the extension's own `src/` or `public/`. It exists to **dogfood**
+  Cockpit's own Dev lane (`npm run dev` → Astro detected → `localhost:4321`
+  preview) and web Build (`npm run docs:build`). Edit docs content under
+  `docs/site/src/content/docs/`.
 - `.github/extensions/cockpit/extension.mjs` — dog-food wrapper that imports the
   root `extension.mjs` so the repo runs the extension against itself.
-- `.github/workflows/ci.yml` — CI (format:check → build → smoke → test) on Node 22.18 & 24.
+- `.github/workflows/ci.yml` — CI (`biome ci .` → build → smoke → test) on Node 22.18 & 24.
 
 ## Critical gotchas
 
@@ -82,7 +90,9 @@ The agent dev loop for any change:
 
 1. **Make the change** in `src/*.ts` / `public/app.js` / docs.
 2. **Run the required checks** until all green:
-   - `npm run format` (or `npm run format:check` to verify) — Prettier.
+   - `npm run lint` (or `npm run lint:fix` to autofix) and `npm run format`
+     (or `npm run format:check` to verify) — Biome. `npm run check` runs
+     `biome check .` (lint + format) first, before build/smoke/test.
    - `npm run build` — `tsc` type-check of both `tsconfig.json` (Node) and
      `tsconfig.client.json` (the `checkJs` browser UI). Also aliased as `npm run typecheck`.
    - `npm run smoke` — loads every SDK-free `src/*.ts` through Node's native
@@ -101,5 +111,5 @@ The agent dev loop for any change:
 ## Conventions
 
 - Conventional Commits (applied by the human at commit time).
-- TypeScript, ESM (`type: module`), Node ≥ 22.18, Prettier-formatted, MIT licensed,
+- TypeScript, ESM (`type: module`), Node ≥ 22.18, Biome-formatted, MIT licensed,
   author Yohan Lasorsa.

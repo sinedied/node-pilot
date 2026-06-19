@@ -13,7 +13,7 @@ Instead of pills, extract proper information about the project. Suggest useful i
 
 - [ ] no disctinction in pinned script, default pinned scripts can be unpinned too
 
-- [ ] dogfood all features
+- [x] dogfood all features
 - [ ] new AGENTS.md rule: ensure UI is responsive and usable at small widths
   * call /rubber-duck after each new set of changes after you're done
 
@@ -27,3 +27,8 @@ Instead of pills, extract proper information about the project. Suggest useful i
 - [ ] add skills (README for example)
 - [ ] logo
 - [ ] css
+
+- [ ] Rayfin sync agenda + notes
+
+- What will be the triggers supported in Functions? Does it includes scheduler?
+- Which identity is used to run the functions? Could we use the workspace identity / a specific identity? (use case call Fabric Admin API)

@@ -43,7 +43,11 @@ test("passes", () => { assert.equal(1 + 1, 2); });
 test("fails", () => { assert.equal(1 + 1, 3); });
 `,
   );
-  controller = new Controller(dir, { sendToChat: async (p) => void (chatPrompt = p) });
+  controller = new Controller(dir, {
+    sendToChat: async (p) => {
+      chatPrompt = p;
+    },
+  });
   await controller.init();
 });
 

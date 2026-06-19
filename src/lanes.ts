@@ -11,7 +11,7 @@ import type {
 } from "./types.ts";
 
 function hasScript(d: ProjectDetection, name: string): boolean {
-  return Boolean(d.scripts && d.scripts[name]);
+  return Boolean(d.scripts?.[name]);
 }
 
 // Pick the first matching script name from a list of candidates.
@@ -188,7 +188,7 @@ export function resolveLane(
 // Which lanes can actually run for this project — used by the UI to hide
 // buttons/tabs that don't apply.
 export function laneAvailability(d: ProjectDetection | null): LaneAvailability {
-  if (!d || !d.hasProject) {
+  if (!d?.hasProject) {
     return {
       build: false,
       typecheck: false,
@@ -216,7 +216,7 @@ export const LANE_TASK_ORDER = ["build", "typecheck", "lint", "format", "test"] 
 // lane that can actually run, in order. These behave like any other pinned task
 // (unpinnable) once a project has its own config.
 export function defaultPinnedTasks(d: Detection | null): PinnedTask[] {
-  const pd: ProjectDetection | null = d && d.hasProject ? d : null;
+  const pd: ProjectDetection | null = d?.hasProject ? d : null;
   const av = laneAvailability(pd);
   return LANE_TASK_ORDER.filter((id) => av[id]).map((id) => ({ type: "lane", id }));
 }

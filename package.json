@@ -29,14 +29,22 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "coverage": "vitest run --coverage",
-    "format": "prettier --write .",
-    "format:check": "prettier --check .",
-    "check": "npm run format:check && npm run build && npm run smoke && npm run test"
+    "dev": "astro dev --root docs/site",
+    "docs:build": "astro build --root docs/site",
+    "docs:preview": "astro preview --root docs/site",
+    "lint": "biome lint .",
+    "lint:fix": "biome lint --write .",
+    "format": "biome format --write .",
+    "format:check": "biome format .",
+    "check": "biome check . && npm run build && npm run smoke && npm run test"
   },
   "devDependencies": {
+    "@astrojs/starlight": "^0.40.0",
+    "@biomejs/biome": "2.5.0",
     "@types/node": "^22.10.0",
     "@vitest/coverage-v8": "^3.0.0",
-    "prettier": "^3.4.2",
+    "astro": "^6.4.8",
+    "sharp": "^0.35.1",
     "typescript": "^5.8.0",
     "vitest": "^3.0.0"
   }
