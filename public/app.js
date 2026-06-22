@@ -74,18 +74,135 @@ function applyTheme(theme) {
 
 // ---- Tabs -----------------------------------------------------------------
 
+const tabBtns = () => $$("#tabs button[data-tab]");
+
 function showTab(name) {
-  for (const b of $$(".tabs button")) b.classList.toggle("active", b.dataset.tab === name);
+  for (const b of tabBtns()) b.classList.toggle("active", b.dataset.tab === name);
   for (const p of $$(".tab-panel")) p.classList.toggle("active", p.id === `tab-${name}`);
   if (name === "problems") requestDiagnostics();
+  recomputeTabOverflow();
 }
 
-$$(".tabs button").forEach((b) => {
+tabBtns().forEach((b) => {
   b.addEventListener("click", () => {
     if (b.classList.contains("hidden")) return;
     showTab(b.dataset.tab);
   });
 });
+
+// Responsive tab bar: tabs that don't fit collapse into a trailing "⋯" (More)
+// overflow menu. The tab buttons stay in the DOM (so their panels, badges and
+// handlers remain wired); overflowed ones are hidden via `.overflow` and proxied
+// by menu items that call showTab(). See the responsive-UI rule in AGENTS.md.
+let overflowTabs = [];
+
+function recomputeTabOverflow() {
+  const bar = $("#tabs");
+  const moreWrap = $("#tab-more-wrap");
+  if (!bar || !moreWrap) return;
+  const all = tabBtns();
+  const avail = all.filter((b) => !b.classList.contains("hidden"));
+  // Reset to the widest layout, then measure.
+  for (const b of all) b.classList.remove("overflow");
+  moreWrap.classList.add("hidden");
+  overflowTabs = [];
+  if (bar.scrollWidth <= bar.clientWidth) {
+    finishTabOverflow();
+    return;
+  }
+  // Reveal More (this reserves its width), then collapse from the right —
+  // lowest-priority tabs first — keeping the active tab visible when possible.
+  moreWrap.classList.remove("hidden");
+  const active = avail.find((b) => b.classList.contains("active")) || null;
+  for (let i = avail.length - 1; i >= 0 && bar.scrollWidth > bar.clientWidth; i--) {
+    const b = avail[i];
+    if (b === active) continue;
+    b.classList.add("overflow");
+    overflowTabs.unshift(b);
+  }
+  // Extreme narrow: even the active tab + More won't fit. Collapse the active
+  // tab too so nothing clips; the menu (and a highlighted More) keep it reachable.
+  if (active && bar.scrollWidth > bar.clientWidth) {
+    active.classList.add("overflow");
+    overflowTabs.unshift(active);
+  }
+  finishTabOverflow();
+}
+
+function finishTabOverflow() {
+  if (!overflowTabs.length) {
+    $("#tab-more-wrap").classList.add("hidden");
+    closeTabMore();
+  }
+  const active = tabBtns().find((b) => b.classList.contains("active"));
+  $("#tab-more").classList.toggle("active", !!active && overflowTabs.includes(active));
+  syncTabMoreBadge();
+  if (!$("#tab-more-menu").classList.contains("hidden")) buildTabMoreMenu();
+}
+
+function tabLabelOf(b) {
+  return [...b.childNodes]
+    .filter((n) => n.nodeType === Node.TEXT_NODE)
+    .map((n) => n.textContent)
+    .join("")
+    .trim();
+}
+
+// Mirror the Problems error/warning badge onto the More button when the Problems
+// tab is hidden inside the overflow menu, so problems stay visible when collapsed.
+function syncTabMoreBadge() {
+  const badge = $("#tab-more-badge");
+  const src = $("#problems-badge");
+  const problems = $("#tabbtn-problems");
+  if (overflowTabs.includes(problems) && src && !src.classList.contains("hidden")) {
+    badge.textContent = src.textContent;
+    badge.className = src.className;
+  } else {
+    badge.textContent = "";
+    badge.className = "tab-badge hidden";
+  }
+}
+
+function buildTabMoreMenu() {
+  const menu = $("#tab-more-menu");
+  menu.innerHTML = "";
+  const active = tabBtns().find((b) => b.classList.contains("active"));
+  for (const b of overflowTabs) {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = "tab-more-menu-item";
+    item.setAttribute("role", "menuitem");
+    if (b === active) item.classList.add("active");
+    const href = b.querySelector("use")?.getAttribute("href") || "#oct-dot-fill";
+    item.innerHTML = `<svg class="oi" aria-hidden="true"><use href="${href}" /></svg><span class="tab-more-name"></span>`;
+    item.querySelector(".tab-more-name").textContent = tabLabelOf(b);
+    if (b.id === "tabbtn-problems") {
+      const src = $("#problems-badge");
+      if (src && !src.classList.contains("hidden")) {
+        const bd = document.createElement("span");
+        bd.className = src.className;
+        bd.textContent = src.textContent;
+        item.append(bd);
+      }
+    }
+    item.addEventListener("click", () => {
+      showTab(b.dataset.tab);
+      closeTabMore();
+    });
+    menu.append(item);
+  }
+}
+
+function openTabMore() {
+  buildTabMoreMenu();
+  $("#tab-more-menu").classList.remove("hidden");
+  $("#tab-more").setAttribute("aria-expanded", "true");
+}
+
+function closeTabMore() {
+  $("#tab-more-menu").classList.add("hidden");
+  $("#tab-more").setAttribute("aria-expanded", "false");
+}
 
 // ---- Header / detection ---------------------------------------------------
 
@@ -346,6 +463,7 @@ function renderTabs() {
   $("#tabbtn-problems").classList.toggle("hidden", hasProject && a.diagnostics === false);
   const active = $(".tabs button.active");
   if (active?.classList.contains("hidden")) showTab("console");
+  recomputeTabOverflow();
 }
 
 // ---- Tasks (unified pinned lanes + scripts) -------------------------------
@@ -677,6 +795,15 @@ function setProblemsStatus(chip, ts) {
 }
 
 function renderProblems() {
+  renderProblemsBody();
+  // The Problems tab badge can appear/grow/shrink on SSE updates, changing the
+  // tab row's intrinsic width without resizing #tabs itself (so the
+  // ResizeObserver won't fire). Recompute overflow directly; this also refreshes
+  // the More badge via finishTabOverflow().
+  recomputeTabOverflow();
+}
+
+function renderProblemsBody() {
   const ts = state.tsLs;
   const a = state.detection?.availability || {};
   const hasProject = !!state.detection?.hasProject;
@@ -1072,9 +1199,21 @@ $("#scripts-toggle").addEventListener("click", (e) => {
   if ($("#scripts-menu").classList.contains("hidden")) openScriptsMenu();
   else closeScriptsMenu();
 });
+$("#tab-more").addEventListener("click", (e) => {
+  e.stopPropagation();
+  if ($("#tab-more-menu").classList.contains("hidden")) openTabMore();
+  else closeTabMore();
+});
 document.addEventListener("click", (e) => {
   const target = /** @type {Element | null} */ (e.target);
   if (!target?.closest(".menu-wrap")) closeScriptsMenu();
+  if (!target?.closest(".tab-more-wrap")) closeTabMore();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") {
+    closeScriptsMenu();
+    closeTabMore();
+  }
 });
 
 $("#console-fix").addEventListener("click", (e) =>
@@ -1126,3 +1265,10 @@ $("#deps-fix").addEventListener("click", () => api("/api/deps/fix", {}));
 
 refreshSettings();
 connect();
+
+// Keep the tab bar responsive: recompute the overflow menu whenever the panel
+// (and thus the tab bar) is resized, plus once on initial layout.
+if (window.ResizeObserver) {
+  new ResizeObserver(() => recomputeTabOverflow()).observe($("#tabs"));
+}
+recomputeTabOverflow();

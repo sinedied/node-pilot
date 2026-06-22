@@ -111,6 +111,10 @@ body {
     sans-serif;
   display: flex;
   flex-direction: column;
+  /* Full-height dashboard: scrolling happens inside panels, never the body.
+     Clipping here also absorbs any transient horizontal tab-bar overflow before
+     the responsive overflow menu (recomputeTabOverflow) settles. */
+  overflow: hidden;
 }
 
 .sprite {
@@ -662,9 +666,11 @@ body {
   padding: 0 12px;
   border-bottom: 1px solid var(--border);
   background: var(--bg-elev);
+  flex-wrap: nowrap;
+  min-width: 0;
 }
 
-.tabs button {
+.tabs > button {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -674,30 +680,117 @@ body {
   color: var(--dim);
   padding: 9px 12px;
   font-weight: 500;
+  white-space: nowrap;
+  flex: 0 0 auto;
 }
 
-.tabs button .oi {
+.tabs > button .oi {
   width: 14px;
   height: 14px;
   opacity: 0.85;
 }
 
-.tabs button.active {
+.tabs > button.active {
   color: var(--text);
   border-bottom-color: var(--accent-emphasis);
 }
 
-.tabs button:hover:not(.active) {
+.tabs > button:hover:not(.active) {
   color: var(--text);
   border-bottom-color: var(--border);
 }
 
-.tabs button:hover .oi {
+.tabs > button:hover .oi {
   opacity: 1;
 }
 
-.tabs button.hidden {
+.tabs > button.hidden {
   display: none !important;
+}
+
+/* Tabs collapsed into the overflow ("More") menu at narrow widths. */
+.tabs > button.overflow {
+  display: none !important;
+}
+
+/* Trailing "More" overflow control. Sits right after the last visible tab;
+   styled like a tab. */
+.tab-more-wrap {
+  position: relative;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: stretch;
+}
+
+.tab-more-wrap.hidden {
+  display: none !important;
+}
+
+.tab-more {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--dim);
+  padding: 9px 10px;
+  white-space: nowrap;
+}
+
+.tab-more .oi {
+  width: 16px;
+  height: 16px;
+  opacity: 0.85;
+}
+
+.tab-more:hover {
+  color: var(--text);
+  border-bottom-color: var(--border);
+}
+
+.tab-more:hover .oi {
+  opacity: 1;
+}
+
+.tab-more.active {
+  color: var(--text);
+  border-bottom-color: var(--accent-emphasis);
+}
+
+.tab-more-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: var(--radius);
+  color: var(--text);
+}
+
+.tab-more-menu-item .oi {
+  width: 14px;
+  height: 14px;
+  opacity: 0.85;
+}
+
+.tab-more-menu-item:hover {
+  background: var(--bg-inset);
+}
+
+.tab-more-menu-item.active {
+  background: var(--bg-inset);
+  font-weight: 600;
+}
+
+.tab-more-menu-item .tab-more-name {
+  flex: 1;
+}
+
+/* Never let the dropdown exceed the (possibly very narrow) panel width — it is
+   the last-resort navigation when every tab has collapsed. */
+#tab-more-menu {
+  max-width: calc(100vw - 16px);
+  min-width: min(220px, calc(100vw - 16px));
 }
 
 main {
@@ -723,6 +816,7 @@ main {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
 }
 
 .panel-head.wrap {
@@ -823,6 +917,7 @@ main {
 .chips {
   display: flex;
   gap: 6px;
+  flex-wrap: wrap;
 }
 
 .chip {

@@ -126,8 +126,12 @@ The agent dev loop for any change:
    - `npm test` — Vitest (`test/**`). `npm run check` runs the whole sequence at once.
 3. **Reload + verify in the canvas**: reload the extension in the Copilot app
    (rediscovers `.github/extensions/`), then `open_canvas` (canvasId `cockpit`) and
-   exercise the affected flow via the UI or `invoke_canvas_action`.
-4. CI (`.github/workflows/ci.yml`) runs the same checks on Node **22.18** (the
+   exercise the affected flow via the UI or `invoke_canvas_action`. For UI work,
+   check it at **small panel widths** too (see the responsive rule in Conventions).
+4. **Rubber-duck review**: after a set of changes passes the checks and canvas
+   verification — and before declaring the work done — run a `/rubber-duck` review of
+   the changes and address its findings.
+5. CI (`.github/workflows/ci.yml`) runs the same checks on Node **22.18** (the
    supported floor) and **24**.
 
 > **Never `git commit` or `git push` without explicit human review and validation
@@ -139,3 +143,9 @@ The agent dev loop for any change:
 - Conventional Commits (applied by the human at commit time).
 - TypeScript, ESM (`type: module`), Node ≥ 22.18, Biome-formatted, MIT licensed,
   author Yohan Lasorsa.
+- **Responsive UI**: the canvas renders in a side panel the user can resize and dock
+  narrow, so every UI must stay usable at small widths — nothing clipped or cut off by
+  horizontal overflow. Let content wrap, scroll, or collapse into a menu instead. The
+  canonical example is the tab bar: tabs that don't fit collapse into a trailing `⋯`
+  (More) overflow menu (`recomputeTabOverflow()` in `public/app.js`). When changing the
+  UI, verify it at a narrow panel width, not just wide.
