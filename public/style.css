@@ -762,9 +762,14 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
+  width: 100%;
   padding: 6px 8px;
+  border: none;
   border-radius: var(--radius);
+  background: transparent;
   color: var(--text);
+  font: inherit;
+  text-align: left;
 }
 
 .tab-more-menu-item .oi {
