@@ -157,6 +157,20 @@
 
     <nav class="toolbar" id="toolbar">
       <span id="pinned" class="pinned"></span>
+      <div class="pinned-more-wrap hidden" id="pinned-more-wrap">
+        <button
+          type="button"
+          id="pinned-more"
+          class="lane-btn"
+          aria-haspopup="true"
+          aria-expanded="false"
+          aria-label="More pinned tasks"
+          title="More pinned tasks"
+        >
+          <svg class="oi" aria-hidden="true"><use href="#oct-kebab-horizontal" /></svg>
+        </button>
+        <div id="pinned-more-menu" class="popover hidden" role="menu"></div>
+      </div>
       <div class="menu-wrap">
         <button type="button" id="scripts-toggle" class="lane-btn" aria-haspopup="true" aria-expanded="false">
           <svg class="oi" aria-hidden="true"><use href="#oct-terminal" /></svg>Tasks<span class="caret"></span>

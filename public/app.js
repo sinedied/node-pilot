@@ -170,12 +170,12 @@ function buildTabMoreMenu() {
   for (const b of overflowTabs) {
     const item = document.createElement("button");
     item.type = "button";
-    item.className = "tab-more-menu-item";
+    item.className = "more-menu-item";
     item.setAttribute("role", "menuitem");
     if (b === active) item.classList.add("active");
     const href = b.querySelector("use")?.getAttribute("href") || "#oct-dot-fill";
-    item.innerHTML = `<svg class="oi" aria-hidden="true"><use href="${href}" /></svg><span class="tab-more-name"></span>`;
-    item.querySelector(".tab-more-name").textContent = tabLabelOf(b);
+    item.innerHTML = `<svg class="oi" aria-hidden="true"><use href="${href}" /></svg><span class="more-menu-name"></span>`;
+    item.querySelector(".more-menu-name").textContent = tabLabelOf(b);
     if (b.id === "tabbtn-problems") {
       const src = $("#problems-badge");
       if (src && !src.classList.contains("hidden")) {
@@ -194,14 +194,31 @@ function buildTabMoreMenu() {
 }
 
 function openTabMore() {
+  closeScriptsMenu();
+  closePinnedMore();
   buildTabMoreMenu();
-  $("#tab-more-menu").classList.remove("hidden");
+  const menu = $("#tab-more-menu");
+  menu.classList.remove("hidden");
   $("#tab-more").setAttribute("aria-expanded", "true");
+  clampPopover(menu);
 }
 
 function closeTabMore() {
   $("#tab-more-menu").classList.add("hidden");
   $("#tab-more").setAttribute("aria-expanded", "false");
+}
+
+// Keep an open dropdown within the viewport horizontally. The body clips
+// overflow, and these menus anchor to buttons that can sit anywhere along the
+// bar, so a menu near an edge must be nudged back in.
+function clampPopover(menu) {
+  menu.style.transform = "";
+  const rect = menu.getBoundingClientRect();
+  const margin = 8;
+  let dx = 0;
+  if (rect.right > window.innerWidth - margin) dx = window.innerWidth - margin - rect.right;
+  if (rect.left + dx < margin) dx = margin - rect.left;
+  if (dx) menu.style.transform = `translateX(${dx}px)`;
 }
 
 // ---- Header / detection ---------------------------------------------------
@@ -522,6 +539,7 @@ function renderPinned() {
   }
   $("#pinned-empty").classList.toggle("hidden", !hasProject || tasks.length > 0);
   renderRunning();
+  recomputePinnedOverflow();
 }
 
 function isPinned(t) {
@@ -590,14 +608,92 @@ async function togglePin(task, pin) {
 }
 
 function openScriptsMenu() {
+  closeTabMore();
+  closePinnedMore();
   renderScriptsMenu();
-  $("#scripts-menu").classList.remove("hidden");
+  const menu = $("#scripts-menu");
+  menu.classList.remove("hidden");
   $("#scripts-toggle").setAttribute("aria-expanded", "true");
+  clampPopover(menu);
 }
 
 function closeScriptsMenu() {
   $("#scripts-menu").classList.add("hidden");
   $("#scripts-toggle").setAttribute("aria-expanded", "false");
+}
+
+// ---- Pinned-tasks overflow (mirrors the tab overflow menu) ----------------
+// At narrow widths the toolbar can't fit every pinned task. Collapse the
+// trailing ones into a "More" menu that runs them on click, keeping the Tasks
+// menu (the pin manager) always reachable on the right.
+let pinnedOverflow = [];
+
+function recomputePinnedOverflow() {
+  const bar = $("#toolbar");
+  const moreWrap = $("#pinned-more-wrap");
+  if (!bar || !moreWrap) return;
+  const all = [...$("#pinned").children];
+  for (const b of all) b.classList.remove("overflow");
+  moreWrap.classList.add("hidden");
+  pinnedOverflow = [];
+  if (bar.scrollWidth <= bar.clientWidth) {
+    closePinnedMore();
+    return;
+  }
+  // Reveal More (reserves its width), then collapse pinned tasks from the right.
+  moreWrap.classList.remove("hidden");
+  for (let i = all.length - 1; i >= 0 && bar.scrollWidth > bar.clientWidth; i--) {
+    all[i].classList.add("overflow");
+    pinnedOverflow.unshift(all[i]);
+  }
+  if (!pinnedOverflow.length) {
+    // Overflow came from the Tasks button alone (no pinned tasks to collapse).
+    moreWrap.classList.add("hidden");
+    closePinnedMore();
+    return;
+  }
+  // Extreme narrow: even ⋯ + Tasks won't fit. Drop ⋯ so the Tasks button (which
+  // lists and runs every task anyway) isn't clipped off the right edge.
+  if (bar.scrollWidth > bar.clientWidth) {
+    moreWrap.classList.add("hidden");
+    closePinnedMore();
+    return;
+  }
+  if (!$("#pinned-more-menu").classList.contains("hidden")) buildPinnedMoreMenu();
+}
+
+function buildPinnedMoreMenu() {
+  const menu = $("#pinned-more-menu");
+  menu.innerHTML = "";
+  for (const b of pinnedOverflow) {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = "more-menu-item";
+    item.setAttribute("role", "menuitem");
+    item.disabled = b.disabled;
+    item.innerHTML = `<svg class="oi" aria-hidden="true"><use href="#oct-terminal" /></svg><span class="more-menu-name"></span>`;
+    item.querySelector(".more-menu-name").textContent = b.textContent;
+    item.addEventListener("click", () => {
+      b.click();
+      closePinnedMore();
+    });
+    menu.append(item);
+  }
+}
+
+function openPinnedMore() {
+  closeScriptsMenu();
+  closeTabMore();
+  buildPinnedMoreMenu();
+  const menu = $("#pinned-more-menu");
+  menu.classList.remove("hidden");
+  $("#pinned-more").setAttribute("aria-expanded", "true");
+  clampPopover(menu);
+}
+
+function closePinnedMore() {
+  $("#pinned-more-menu").classList.add("hidden");
+  $("#pinned-more").setAttribute("aria-expanded", "false");
 }
 
 // ---- Console --------------------------------------------------------------
@@ -1204,15 +1300,22 @@ $("#tab-more").addEventListener("click", (e) => {
   if ($("#tab-more-menu").classList.contains("hidden")) openTabMore();
   else closeTabMore();
 });
+$("#pinned-more").addEventListener("click", (e) => {
+  e.stopPropagation();
+  if ($("#pinned-more-menu").classList.contains("hidden")) openPinnedMore();
+  else closePinnedMore();
+});
 document.addEventListener("click", (e) => {
   const target = /** @type {Element | null} */ (e.target);
   if (!target?.closest(".menu-wrap")) closeScriptsMenu();
   if (!target?.closest(".tab-more-wrap")) closeTabMore();
+  if (!target?.closest(".pinned-more-wrap")) closePinnedMore();
 });
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
     closeScriptsMenu();
     closeTabMore();
+    closePinnedMore();
   }
 });
 
@@ -1266,9 +1369,15 @@ $("#deps-fix").addEventListener("click", () => api("/api/deps/fix", {}));
 refreshSettings();
 connect();
 
-// Keep the tab bar responsive: recompute the overflow menu whenever the panel
-// (and thus the tab bar) is resized, plus once on initial layout.
+// Keep the tab bar and toolbar responsive: recompute their overflow menus
+// whenever the panel is resized, plus once on initial layout.
 if (window.ResizeObserver) {
-  new ResizeObserver(() => recomputeTabOverflow()).observe($("#tabs"));
+  const ro = new ResizeObserver(() => {
+    recomputeTabOverflow();
+    recomputePinnedOverflow();
+  });
+  ro.observe($("#tabs"));
+  ro.observe($("#toolbar"));
 }
 recomputeTabOverflow();
+recomputePinnedOverflow();

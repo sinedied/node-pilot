@@ -437,6 +437,7 @@ body {
   font-weight: 500;
   font-size: 12px;
   white-space: nowrap;
+  flex: 0 0 auto;
 }
 
 .lane-btn:hover {
@@ -515,7 +516,8 @@ body {
   display: flex;
   gap: 8px;
   padding: 8px 12px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  min-width: 0;
   align-items: center;
   border-bottom: 1px solid var(--border);
 }
@@ -529,6 +531,11 @@ body {
 
 .toolbar .sep.hidden,
 .lane-btn.hidden {
+  display: none !important;
+}
+
+/* Pinned tasks collapsed into the "More" overflow menu at narrow widths. */
+.lane-btn.overflow {
   display: none !important;
 }
 
@@ -566,6 +573,26 @@ body {
 .menu-wrap {
   position: relative;
   margin-left: auto;
+  flex: 0 0 auto;
+}
+
+/* Overflow control for pinned tasks. Sits just after the visible pinned tasks
+   (left-packed; the Tasks menu keeps its margin-left:auto and stays far right). */
+.pinned-more-wrap {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.pinned-more-wrap.hidden {
+  display: none !important;
+}
+
+/* The pinned overflow control is near the left, so drop the menu down-right. */
+#pinned-more-menu {
+  left: 0;
+  right: auto;
+  max-width: calc(100vw - 16px);
+  min-width: min(220px, calc(100vw - 16px));
 }
 
 .popover {
@@ -758,7 +785,7 @@ body {
   border-bottom-color: var(--accent-emphasis);
 }
 
-.tab-more-menu-item {
+.more-menu-item {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -772,22 +799,26 @@ body {
   text-align: left;
 }
 
-.tab-more-menu-item .oi {
+.more-menu-item .oi {
   width: 14px;
   height: 14px;
   opacity: 0.85;
 }
 
-.tab-more-menu-item:hover {
+.more-menu-item:hover {
   background: var(--bg-inset);
 }
 
-.tab-more-menu-item.active {
+.more-menu-item.active {
   background: var(--bg-inset);
   font-weight: 600;
 }
 
-.tab-more-menu-item .tab-more-name {
+.more-menu-item:disabled {
+  opacity: 0.5;
+}
+
+.more-menu-item .more-menu-name {
   flex: 1;
 }
 
