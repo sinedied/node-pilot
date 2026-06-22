@@ -21,15 +21,18 @@ inspiration: [coffilot](https://github.com/jdubois/coffilot). Full design in
   - `types.ts` (shared domain types), `detect.ts` (pm/scripts/framework/TS/runners),
     `pm.ts`, `process-runner.ts` (cross-platform spawn), `lanes.ts`, `test-report.ts`,
     `deps.ts` (safe-update loop + rollback), `info.ts` (lazy Info-tab metrics:
-    transitive deps + sizes), `controller.ts` (central state + SSE
+    transitive deps + sizes), `ts-server.ts` (SDK-free `tsserver` client powering
+    the live Problems panel), `controller.ts` (central state + SSE
     events), `server.ts` (http + SSE + `/api/*`), `actions.ts` (agent actions),
     `fix.ts` (prompt builders), `settings.ts` (per-project pinned tasks + theme).
 - `types/copilot-sdk.d.ts` — ambient shim for `@github/copilot-sdk/extension` so `tsc`
   resolves it in CI (the real package only exists inside the Copilot app).
-- `public/` — vanilla HTML/CSS/JS UI (Info / Console / Tests / Dev / Dependencies tabs),
+- `public/` — vanilla HTML/CSS/JS UI (Info / Console / Problems / Tests / Dev /
+  Dependencies tabs),
   GitHub Primer light/dark theming + inline Octicon sprite (MIT, bundled, no network).
   `public/app.js` stays JS, type-checked via `tsconfig.client.json` (`checkJs`).
-- `test/` — Vitest specs (`core.test.ts`, `deps.test.ts`). `scripts/smoke.mjs`
+- `test/` — Vitest specs (`core.test.ts`, `deps.test.ts`, `info.test.ts`,
+  `settings.test.ts`, `ts-server.test.ts`). `scripts/smoke.mjs`
   dynamically imports every SDK-free `src/*.ts` to prove native type-stripping loads.
 - `biome.json` — Biome config (lint + format, replaces Prettier). `noImportantStyles`
   is off (the cursor/spinner `!important` rules are deliberate, see gotcha below).
@@ -83,6 +86,29 @@ inspiration: [coffilot](https://github.com/jdubois/coffilot). Full design in
 - **Lane availability**: each `resolve*()` in `lanes.ts` reports `{unavailable}`;
   `laneAvailability(d)` aggregates it onto `detection.availability` so the UI hides
   lanes/tabs that don't apply.
+- **TS language server (`ts-server.ts` → Problems tab)** — a few hard-won rules:
+  - **Never spawn `process.execPath`** to run `tsserver.js`. Inside the extension
+    fork, `execPath` is the **host Copilot CLI binary** (e.g. `.../copilot`), which
+    refuses to run an arbitrary JS file, so tsserver exits instantly and you silently
+    get zero diagnostics. Use `resolveNodePath()` (trusts `execPath` only when it is
+    actually `node`, else scans `PATH`). The GUI app's fork inherits a real `PATH`
+    that includes the user's node.
+  - **Representative file must be inside the project's tsconfig.** tsserver needs one
+    open file to resolve the containing project, then `geterrForProject` reports for
+    that file's project. Opening a **root-level `*.config.ts`** (usually excluded from
+    `include`) lands tsserver in an empty *inferred project* → zero diagnostics.
+    `findRepresentativeFile()` therefore prefers a file under a real source dir
+    (`src`, `lib`, `app`, …) and treats root config files as a last resort.
+  - **Refresh = `reloadProjects` + close the opened file.** tsserver treats opened
+    files as client-owned, so `reloadProjects` alone won't pick up on-disk edits to the
+    representative file; `reload()` sends `close` for it (then re-opens on the next
+    request) so edits to *any* file — opened or not — are seen.
+  - **`suggestionDiag` is noise** (library deprecation hints from lib.dom/lib.es5);
+    only `syntacticDiag` + `semanticDiag` (category error/warning) are kept, filtered
+    to files within the project tree.
+  - **Saved files only.** The canvas is not an editor — there are no dirty buffers, so
+    diagnostics always reflect what's on disk. Documented limitation, acceptable for a
+    side panel.
 
 ## Workflow
 

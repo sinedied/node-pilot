@@ -2,6 +2,7 @@
 // project's own package.json scripts; otherwise fall back to running the locally
 // installed tool with sensible defaults.
 import { runScript, exec } from "./pm.ts";
+import { resolveTsserverPath } from "./ts-server.ts";
 import type {
   Detection,
   LaneAvailability,
@@ -185,6 +186,12 @@ export function resolveLane(
   }
 }
 
+// Live diagnostics are available when the project uses TypeScript (or type-aware
+// JS) and its own tsserver is resolvable. Sync check (laneAvailability is sync).
+export function resolveDiagnostics(d: ProjectDetection): boolean {
+  return d.typescript && resolveTsserverPath(d.cwd) !== null;
+}
+
 // Which lanes can actually run for this project — used by the UI to hide
 // buttons/tabs that don't apply.
 export function laneAvailability(d: ProjectDetection | null): LaneAvailability {
@@ -196,6 +203,7 @@ export function laneAvailability(d: ProjectDetection | null): LaneAvailability {
       format: false,
       test: false,
       dev: false,
+      diagnostics: false,
     };
   }
   return {
@@ -205,6 +213,7 @@ export function laneAvailability(d: ProjectDetection | null): LaneAvailability {
     format: !resolveFormat(d).unavailable,
     test: !resolveTest(d).unavailable,
     dev: !resolveDev(d).unavailable,
+    diagnostics: resolveDiagnostics(d),
   };
 }
 

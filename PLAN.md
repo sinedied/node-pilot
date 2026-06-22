@@ -70,7 +70,7 @@ corepack when present.
 | --------------- | -------------------------------------------------------- | ----------------------------------------------------- |
 | **(none)**      | no `package.json`                                        | "needs a Node.js project" notice; lanes disabled      |
 | **Node (base)** | `package.json`                                           | Script runner; Build / Lint / Test from scripts; deps |
-| **TypeScript**  | `tsconfig.json` / `typescript` dep                       | Type-check lane (`tsc --noEmit`)                      |
+| **TypeScript**  | `tsconfig.json` / `typescript` dep                       | Type-check lane (`tsc --noEmit`) + live Problems panel (tsserver) |
 | **Framework**   | vite / next / nuxt / astro / svelte / remix config + dep | Dev lane with served-URL detection + embedded preview |
 | **Test runner** | vitest / jest / node:test / bun config + dep             | Graphical test report (pass/fail, per-test, stacks)   |
 | **Monorepo**    | `workspaces` field / `pnpm-workspace.yaml` / turbo / nx  | Workspace / package picker (basic in MVP)             |
@@ -147,6 +147,10 @@ A capability summary + active PM is shown in the status bar.
   run for selected workspace(s).
 - **Migration / codemod runners** — jscodeshift and framework codemods with the same
   verify + rollback safety as dependency updates.
+- **Semantic language-server actions (Tier 2)** — build on the `tsserver` client
+  that already powers the Problems panel to add agent-facing `find_references`,
+  `go_to_definition`, `hover` / quick-info and rename, so Copilot can navigate types
+  semantically rather than by text search.
 - **Persisted per-project settings** — verify-suite config, default dev port,
   auto-open preview, selected workspace.
 - **Persisted state across reloads** — move lane state out of memory.
@@ -201,3 +205,6 @@ cockpit/
 10. **Fix with Copilot** — wire across all lanes.
 11. **Agent actions** — surface the full action set.
 12. **Polish** — theming / responsive UI, README, dog-food self-test.
+13. **Live Problems panel** — project-wide TypeScript diagnostics via the project's own
+    `tsserver` (errors + warnings, auto-refresh on file change, Fix / Fix-all with
+    Copilot), gated on TypeScript detection.

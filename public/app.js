@@ -16,6 +16,14 @@ const state = {
   deps: { outdated: null, audit: null, update: null },
   settings: { theme: "auto", pinnedTasks: [] },
   stats: null,
+  tsLs: {
+    status: "stopped",
+    diagnostics: [],
+    errorCount: 0,
+    warningCount: 0,
+    lastUpdated: null,
+    reason: null,
+  },
 };
 
 // Human-readable byte size (base-1000, matching npm/registry conventions).
@@ -69,6 +77,7 @@ function applyTheme(theme) {
 function showTab(name) {
   for (const b of $$(".tabs button")) b.classList.toggle("active", b.dataset.tab === name);
   for (const p of $$(".tab-panel")) p.classList.toggle("active", p.id === `tab-${name}`);
+  if (name === "problems") requestDiagnostics();
 }
 
 $$(".tabs button").forEach((b) => {
@@ -328,12 +337,13 @@ async function loadStats(rows, detection) {
   );
 }
 
-// Hide the Tests / Dev tabs when the project has nothing to run there.
+// Hide the Tests / Dev / Problems tabs when the project has nothing to run there.
 function renderTabs() {
   const a = state.detection?.availability || {};
   const hasProject = !!state.detection?.hasProject;
   $("#tabbtn-tests").classList.toggle("hidden", hasProject && a.test === false);
   $("#tabbtn-dev").classList.toggle("hidden", hasProject && a.dev === false);
+  $("#tabbtn-problems").classList.toggle("hidden", hasProject && a.diagnostics === false);
   const active = $(".tabs button.active");
   if (active?.classList.contains("hidden")) showTab("console");
 }
@@ -628,6 +638,176 @@ function renderTests() {
   $("#test-raw").textContent = strip(state.lanes.test?.output || "");
 }
 
+// ---- Problems (TypeScript language-server diagnostics) --------------------
+
+// Lazily ask the backend for a fresh project-wide diagnostics snapshot. Results
+// also arrive via SSE (ts:status / ts:diagnostics), so this just primes them.
+function requestDiagnostics() {
+  const a = state.detection?.availability || {};
+  if (!state.detection?.hasProject || a.diagnostics === false) {
+    renderProblems();
+    return;
+  }
+  api("/api/diagnostics", {}).then((ts) => {
+    if (ts && typeof ts === "object" && "status" in ts) {
+      state.tsLs = ts;
+      renderProblems();
+    }
+  });
+}
+
+const DIAG_ICON = { error: "x-circle-fill", warning: "alert" };
+
+function setProblemsStatus(chip, ts) {
+  chip.className = "status-chip";
+  chip.innerHTML = "";
+  if (ts.status === "starting" || ts.status === "analyzing") {
+    chip.classList.add("running");
+    chip.innerHTML = `<svg class="oi spin"><use href="#oct-sync" /></svg>`;
+    chip.append(document.createTextNode("analyzing"));
+  } else if (ts.status === "error") {
+    chip.classList.add("failed");
+    chip.innerHTML = `<svg class="oi"><use href="#oct-x-circle-fill" /></svg>`;
+    chip.append(document.createTextNode("error"));
+  } else if (ts.status === "ready" && !ts.errorCount && !ts.warningCount) {
+    chip.classList.add("passed");
+    chip.innerHTML = `<svg class="oi"><use href="#oct-check-circle-fill" /></svg>`;
+    chip.append(document.createTextNode("no problems"));
+  }
+}
+
+function renderProblems() {
+  const ts = state.tsLs;
+  const a = state.detection?.availability || {};
+  const hasProject = !!state.detection?.hasProject;
+  const chips = $("#problems-chips");
+  const status = $("#problems-status");
+  const fixBtn = $("#problems-fix");
+  const groups = $("#problems-groups");
+  const empty = $("#problems-empty");
+  const badge = $("#problems-badge");
+
+  const totalErr = ts.errorCount || 0;
+  const totalWarn = ts.warningCount || 0;
+
+  // Tab badge: error count, else warning count.
+  if (totalErr) {
+    badge.textContent = String(totalErr);
+    badge.className = "tab-badge error";
+  } else if (totalWarn) {
+    badge.textContent = String(totalWarn);
+    badge.className = "tab-badge warning";
+  } else {
+    badge.className = "tab-badge hidden";
+  }
+
+  // Unavailable: no project, or no TypeScript in the project.
+  if (!hasProject || a.diagnostics === false) {
+    chips.innerHTML = "";
+    groups.innerHTML = "";
+    fixBtn.classList.add("hidden");
+    badge.className = "tab-badge hidden";
+    status.className = "status-chip";
+    status.innerHTML = "";
+    empty.classList.remove("hidden");
+    if (!hasProject) {
+      empty.innerHTML = `<svg class="oi"><use href="#oct-info" /></svg> No Node.js project detected.`;
+    } else {
+      empty.innerHTML = `<svg class="oi"><use href="#oct-info" /></svg> No TypeScript detected — add <code>typescript</code> or a <code>tsconfig.json</code> to enable live diagnostics.`;
+    }
+    return;
+  }
+
+  setProblemsStatus(status, ts);
+
+  chips.innerHTML = "";
+  const mk = (cls, label) => {
+    const c = document.createElement("span");
+    c.className = `chip ${cls}`;
+    c.textContent = label;
+    return c;
+  };
+  if (totalErr) chips.append(mk("fail", `${totalErr} error${totalErr === 1 ? "" : "s"}`));
+  if (totalWarn) chips.append(mk("skip", `${totalWarn} warning${totalWarn === 1 ? "" : "s"}`));
+
+  const diags = ts.diagnostics || [];
+  fixBtn.classList.toggle("hidden", diags.length === 0);
+
+  if (!diags.length) {
+    groups.innerHTML = "";
+    empty.classList.remove("hidden");
+    if (ts.status === "starting" || ts.status === "analyzing") {
+      empty.innerHTML = `<svg class="oi spin"><use href="#oct-sync" /></svg> Analyzing project…`;
+    } else if (ts.status === "error") {
+      empty.innerHTML = `<svg class="oi"><use href="#oct-x-circle-fill" /></svg> `;
+      empty.append(document.createTextNode(ts.reason || "Diagnostics unavailable."));
+    } else {
+      empty.innerHTML = `<svg class="oi"><use href="#oct-check-circle-fill" /></svg> No problems found.`;
+    }
+    return;
+  }
+  empty.classList.add("hidden");
+
+  // Group diagnostics by file, errors-first ordering preserved from backend.
+  const byFile = new Map();
+  for (const d of diags) {
+    if (!byFile.has(d.file)) byFile.set(d.file, []);
+    byFile.get(d.file).push(d);
+  }
+
+  groups.innerHTML = "";
+  for (const [file, list] of byFile) {
+    const errs = list.filter((d) => d.category === "error").length;
+    const warns = list.length - errs;
+    const det = document.createElement("details");
+    det.className = `suite ${errs ? "failed" : "skipped"}`;
+    det.open = true;
+    const head = document.createElement("summary");
+    head.className = "suite-head";
+    head.innerHTML = `<svg class="oi suite-status"><use href="#oct-${errs ? "x-circle-fill" : "alert"}" /></svg>`;
+    const name = document.createElement("span");
+    name.className = "suite-name";
+    name.textContent = relPath(file);
+    name.title = file;
+    head.append(name);
+    const counts = [];
+    if (errs) counts.push(`${errs} error${errs === 1 ? "" : "s"}`);
+    if (warns) counts.push(`${warns} warning${warns === 1 ? "" : "s"}`);
+    const meta = document.createElement("span");
+    meta.className = "suite-meta";
+    meta.textContent = counts.join(" · ");
+    head.append(meta);
+    det.append(head);
+
+    const rows = document.createElement("div");
+    rows.className = "suite-rows";
+    for (const d of list) {
+      const row = document.createElement("div");
+      row.className = `diag-row ${d.category}`;
+      row.innerHTML = `<svg class="oi diag-icon"><use href="#oct-${DIAG_ICON[d.category] || "dot-fill"}" /></svg>`;
+      const loc = document.createElement("span");
+      loc.className = "diag-loc";
+      loc.textContent = `${d.start.line}:${d.start.offset}`;
+      const code = document.createElement("span");
+      code.className = "diag-code";
+      code.textContent = d.code ? `TS${d.code}` : d.category;
+      const msg = document.createElement("span");
+      msg.className = "diag-msg";
+      msg.textContent = d.text;
+      const fix = document.createElement("button");
+      fix.type = "button";
+      fix.className = "diag-fix fix-btn";
+      fix.title = "Fix with Copilot";
+      fix.innerHTML = `<svg class="oi" aria-hidden="true"><use href="#oct-copilot" /></svg>`;
+      fix.addEventListener("click", () => api("/api/diagnostics/fix", { diagnostic: d }));
+      row.append(loc, code, msg, fix);
+      rows.append(row);
+    }
+    det.append(rows);
+    groups.append(det);
+  }
+}
+
 // ---- Dev ------------------------------------------------------------------
 
 function renderDev() {
@@ -748,6 +928,7 @@ function applyEvent(e) {
       state.lanes = e.state.lanes || {};
       renderProject();
       renderTests();
+      renderProblems();
       renderDev();
       renderOutdated();
       renderAudit();
@@ -798,6 +979,19 @@ function applyEvent(e) {
     case "test:report":
       state.test.report = e.report;
       renderTests();
+      break;
+    case "ts:status":
+      state.tsLs = {
+        ...state.tsLs,
+        status: e.status,
+        errorCount: e.errorCount ?? state.tsLs.errorCount,
+        warningCount: e.warningCount ?? state.tsLs.warningCount,
+      };
+      renderProblems();
+      break;
+    case "ts:diagnostics":
+      state.tsLs = e.tsLs;
+      renderProblems();
       break;
     case "dev:start":
       state.dev = { status: "running", url: null, output: "", label: e.label };
@@ -888,6 +1082,9 @@ $("#console-fix").addEventListener("click", (e) =>
 );
 $("#test-fix").addEventListener("click", () => api("/api/fix", { lane: "test" }));
 $("#test-raw-toggle").addEventListener("click", () => $("#test-raw").classList.toggle("hidden"));
+
+$("#problems-refresh").addEventListener("click", () => requestDiagnostics());
+$("#problems-fix").addEventListener("click", () => api("/api/diagnostics/fix", { all: true }));
 
 $("#dev-start").addEventListener("click", () => api("/api/dev/start", {}));
 $("#dev-stop").addEventListener("click", () => api("/api/dev/stop", {}));

@@ -221,6 +221,32 @@ export function buildActions(controller: Controller): ActionDefinition[] {
       handler: async () => controller.rollbackLastUpdate(),
     },
     {
+      name: "get_diagnostics",
+      description:
+        "Get live project-wide TypeScript diagnostics (errors + warnings with file, line, column, TS code and message) from the project's own language server. Reflects saved files on disk. Returns counts plus the list.",
+      handler: async () => {
+        const d = controller.detection;
+        if (!d?.hasProject) return { hasProject: false, reason: d?.reason };
+        if (!d.availability?.diagnostics)
+          return { available: false, reason: "TypeScript not detected in this project." };
+        const ts = await controller.getDiagnostics();
+        return {
+          available: true,
+          status: ts.status,
+          errorCount: ts.errorCount,
+          warningCount: ts.warningCount,
+          diagnostics: ts.diagnostics.slice(0, 200).map((x) => ({
+            file: x.file,
+            line: x.start.line,
+            column: x.start.offset,
+            code: x.code,
+            category: x.category,
+            message: x.text,
+          })),
+        };
+      },
+    },
+    {
       name: "fix_issue",
       description:
         "Push the most recent failure of a lane ('build'|'lint'|'typecheck'|'test'|'dev'|'script:<name>') to the chat as a context-rich Fix-with-Copilot prompt.",

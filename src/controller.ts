@@ -4,6 +4,7 @@
 import { EventEmitter } from "node:events";
 import path from "node:path";
 import os from "node:os";
+import { watch as fsWatch, statSync, type FSWatcher } from "node:fs";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { detect } from "./detect.ts";
 import { run, start } from "./process-runner.ts";
@@ -17,7 +18,8 @@ import {
 } from "./lanes.ts";
 import { parseJestLike, parseTap, parseTextCounts } from "./test-report.ts";
 import { pushCapped, extractUrl, isPortInUse } from "./util.ts";
-import { buildFixPrompt, buildTestFixPrompt } from "./fix.ts";
+import { buildFixPrompt, buildTestFixPrompt, buildDiagnosticFixPrompt } from "./fix.ts";
+import { TsServerClient, resolveTsserverPath } from "./ts-server.ts";
 import { loadSettings, saveSettings } from "./settings.ts";
 import { computeStats } from "./info.ts";
 import * as deps from "./deps.ts";
@@ -28,15 +30,48 @@ import type {
   Detection,
   DepsState,
   DevState,
+  Diagnostic,
   FixContextEntry,
   LaneState,
   ProjectStats,
   ResolvedSettings,
   SettingsPatch,
   TestReport,
+  TsLsState,
 } from "./types.ts";
 
 const ONE_SHOT_LANES = ["build", "lint", "format", "typecheck", "test"];
+
+// Source dirs we recursively watch for diagnostics refresh (avoids registering
+// OS watchers over node_modules). The project root is always watched shallowly
+// for top-level source + tsconfig changes.
+const TS_WATCH_DIRS = [
+  "src",
+  "lib",
+  "app",
+  "pages",
+  "components",
+  "routes",
+  "server",
+  "packages",
+  "test",
+  "tests",
+];
+const TS_WATCH_EXT = new Set([
+  ".ts",
+  ".tsx",
+  ".mts",
+  ".cts",
+  ".js",
+  ".jsx",
+  ".mjs",
+  ".cjs",
+  ".json",
+  ".vue",
+  ".svelte",
+  ".astro",
+]);
+const TS_IDLE_MS = 10 * 60 * 1000;
 
 export interface ControllerOptions {
   sendToChat?: (prompt: string) => Promise<void> | void;
@@ -60,6 +95,12 @@ export class Controller {
   fixContext: Record<string, FixContextEntry>;
   projectStats: ProjectStats | null;
   _statsPromise: Promise<ProjectStats> | null;
+  tsLs: TsLsState;
+  _tsClient: TsServerClient | null;
+  _tsWatchers: FSWatcher[];
+  _tsRefreshTimer: NodeJS.Timeout | null;
+  _tsRestartTimer: NodeJS.Timeout | null;
+  _tsIdleTimer: NodeJS.Timeout | null;
 
   constructor(cwd: string, { sendToChat }: ControllerOptions = {}) {
     this.cwd = cwd;
@@ -75,6 +116,23 @@ export class Controller {
     this.fixContext = {}; // lane -> last failure { command, output, exitCode, report }
     this.projectStats = null;
     this._statsPromise = null;
+    this.tsLs = this.freshTsLs();
+    this._tsClient = null;
+    this._tsWatchers = [];
+    this._tsRefreshTimer = null;
+    this._tsRestartTimer = null;
+    this._tsIdleTimer = null;
+  }
+
+  freshTsLs(): TsLsState {
+    return {
+      status: "stopped",
+      diagnostics: [],
+      errorCount: 0,
+      warningCount: 0,
+      lastUpdated: null,
+      reason: null,
+    };
   }
 
   freshLane(id: string): LaneState {
@@ -110,6 +168,7 @@ export class Controller {
   // every canvas open / action via `ctx.session.workingDirectory`.
   async ensureProjectDir(dir?: string): Promise<Detection | null> {
     if (dir && dir !== this.cwd) {
+      this.stopTsServer();
       this.cwd = dir;
       await this.init();
     } else if (!this.detection) {
@@ -179,6 +238,7 @@ export class Controller {
       test: this.test,
       dev: { ...this.dev, output: this.dev.output.join(""), _handle: undefined },
       deps: this.deps,
+      tsLs: this.tsLs,
     };
   }
 
@@ -415,6 +475,202 @@ export class Controller {
     return { ok: true };
   }
 
+  // ---- TypeScript language server (live diagnostics) ----------------------
+
+  // Lazy entry point: ensure the server + watchers are up and return a fresh
+  // project-wide diagnostics snapshot. Called when the Problems tab opens or via
+  // the get_diagnostics action.
+  async getDiagnostics(): Promise<TsLsState> {
+    await this.refreshDiagnostics({ reload: false });
+    return this.tsLs;
+  }
+
+  private ensureTsClient(): TsServerClient | null {
+    const d = this.detection;
+    if (!d?.hasProject) return null;
+    if (this._tsClient && this._tsClient.cwd !== this.cwd) {
+      this._tsClient.stop();
+      this._tsClient = null;
+    }
+    if (!this._tsClient) {
+      const tsserverPath = resolveTsserverPath(this.cwd);
+      if (!tsserverPath) return null;
+      this._tsClient = new TsServerClient(this.cwd, tsserverPath);
+    }
+    return this._tsClient;
+  }
+
+  private async refreshDiagnostics({ reload = false } = {}): Promise<void> {
+    const d = this.detection;
+    if (!d?.hasProject || !d.availability?.diagnostics) {
+      this.setTsState({
+        ...this.freshTsLs(),
+        reason: "TypeScript not detected in this project.",
+      });
+      return;
+    }
+    const client = this.ensureTsClient();
+    if (!client) {
+      this.setTsState({
+        ...this.tsLs,
+        status: "error",
+        reason: "Could not resolve the project's TypeScript (tsserver).",
+      });
+      return;
+    }
+    this.setupTsWatchers();
+    this.resetTsIdle();
+    this.tsLs.status = client.running ? "analyzing" : "starting";
+    this.tsLs.reason = null;
+    this.emitTsStatus();
+    if (reload) client.reload();
+    try {
+      const diagnostics = await client.getProjectDiagnostics();
+      const errorCount = diagnostics.filter((x) => x.category === "error").length;
+      const warningCount = diagnostics.filter((x) => x.category === "warning").length;
+      this.setTsState({
+        status: "ready",
+        diagnostics,
+        errorCount,
+        warningCount,
+        lastUpdated: Date.now(),
+        reason: null,
+      });
+    } catch (err) {
+      this.setTsState({
+        ...this.tsLs,
+        status: "error",
+        reason: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  private setTsState(next: TsLsState): void {
+    this.tsLs = next;
+    this.emitTsDiagnostics();
+  }
+
+  private emitTsStatus(): void {
+    this.broadcast({
+      type: "ts:status",
+      status: this.tsLs.status,
+      errorCount: this.tsLs.errorCount,
+      warningCount: this.tsLs.warningCount,
+    });
+  }
+
+  private emitTsDiagnostics(): void {
+    this.broadcast({ type: "ts:diagnostics", tsLs: this.tsLs });
+  }
+
+  // ---- File watching → debounced refresh / restart ------------------------
+
+  private setupTsWatchers(): void {
+    if (this._tsWatchers.length) return;
+    const onChange = (_event: string, filename: string | Buffer | null) =>
+      this.onTsFsEvent(filename);
+    const watch = (target: string, recursive: boolean) => {
+      try {
+        this._tsWatchers.push(fsWatch(target, { recursive }, onChange));
+      } catch {}
+    };
+    watch(this.cwd, false);
+    let watched = 0;
+    for (const name of TS_WATCH_DIRS) {
+      const dir = path.join(this.cwd, name);
+      try {
+        if (statSync(dir).isDirectory()) {
+          watch(dir, true);
+          watched++;
+        }
+      } catch {}
+    }
+    // No curated source dirs → fall back to a filtered recursive watch.
+    if (!watched) watch(this.cwd, true);
+  }
+
+  private teardownTsWatchers(): void {
+    for (const w of this._tsWatchers) {
+      try {
+        w.close();
+      } catch {}
+    }
+    this._tsWatchers = [];
+  }
+
+  private onTsFsEvent(filename: string | Buffer | null): void {
+    if (filename == null) {
+      this.scheduleTsRefresh();
+      return;
+    }
+    const name = filename.toString();
+    if (name.includes("node_modules") || name.includes(`.git${path.sep}`)) return;
+    const base = path.basename(name);
+    if (/^tsconfig.*\.json$/i.test(base)) {
+      this.scheduleTsRestart();
+      return;
+    }
+    if (!TS_WATCH_EXT.has(path.extname(base))) return;
+    this.scheduleTsRefresh();
+  }
+
+  private scheduleTsRefresh(): void {
+    this.resetTsIdle();
+    if (this._tsRefreshTimer) clearTimeout(this._tsRefreshTimer);
+    this._tsRefreshTimer = setTimeout(() => {
+      this._tsRefreshTimer = null;
+      void this.refreshDiagnostics({ reload: true });
+    }, 400);
+  }
+
+  private scheduleTsRestart(): void {
+    this.resetTsIdle();
+    if (this._tsRestartTimer) clearTimeout(this._tsRestartTimer);
+    this._tsRestartTimer = setTimeout(() => {
+      this._tsRestartTimer = null;
+      // Recreate the client so it picks up the new tsconfig/project layout.
+      if (this._tsClient) {
+        this._tsClient.stop();
+        this._tsClient = null;
+      }
+      void this.refreshDiagnostics({ reload: false });
+    }, 600);
+  }
+
+  private resetTsIdle(): void {
+    if (this._tsIdleTimer) clearTimeout(this._tsIdleTimer);
+    this._tsIdleTimer = setTimeout(() => this.idleStopTsServer(), TS_IDLE_MS);
+  }
+
+  // Idle: stop the (memory-heavy) server + watchers but keep the last results on
+  // screen. The next getDiagnostics() lazily restarts everything.
+  private idleStopTsServer(): void {
+    if (this._tsIdleTimer) {
+      clearTimeout(this._tsIdleTimer);
+      this._tsIdleTimer = null;
+    }
+    this.teardownTsWatchers();
+    if (this._tsClient) this._tsClient.stop();
+    this.tsLs = { ...this.tsLs, status: "stopped" };
+    this.emitTsStatus();
+  }
+
+  // Full teardown (project change / canvas close): drop the client and results.
+  stopTsServer(): void {
+    for (const t of [this._tsRefreshTimer, this._tsRestartTimer, this._tsIdleTimer]) {
+      if (t) clearTimeout(t);
+    }
+    this._tsRefreshTimer = null;
+    this._tsRestartTimer = null;
+    this._tsIdleTimer = null;
+    this.teardownTsWatchers();
+    if (this._tsClient) {
+      this._tsClient.stop();
+      this._tsClient = null;
+    }
+    this.tsLs = this.freshTsLs();
+  }
+
   // ---- Dependencies (delegated to deps.ts) --------------------------------
 
   listOutdated() {
@@ -457,5 +713,23 @@ export class Controller {
 
   async sendPromptToChat(prompt: string): Promise<void> {
     await this.sendToChat(prompt);
+  }
+
+  // Push a single diagnostic (or all current ones) to the chat as a Fix prompt.
+  async fixDiagnostic(diagnostic: Diagnostic | null): Promise<{ ok: boolean; reason?: string }> {
+    if (!diagnostic?.file) return { ok: false, reason: "No diagnostic to fix." };
+    const prompt = buildDiagnosticFixPrompt({ cwd: this.cwd, diagnostics: [diagnostic] });
+    await this.sendToChat(prompt);
+    this.log(`Sent ${diagnostic.code ? `TS${diagnostic.code}` : "diagnostic"} to Copilot.`);
+    return { ok: true };
+  }
+
+  async fixAllDiagnostics(): Promise<{ ok: boolean; reason?: string }> {
+    const diagnostics = this.tsLs.diagnostics;
+    if (!diagnostics.length) return { ok: false, reason: "No diagnostics to fix." };
+    const prompt = buildDiagnosticFixPrompt({ cwd: this.cwd, diagnostics });
+    await this.sendToChat(prompt);
+    this.log(`Sent ${diagnostics.length} diagnostic(s) to Copilot.`);
+    return { ok: true };
   }
 }

@@ -994,6 +994,88 @@ main {
   text-align: center;
 }
 
+/* ---- Problems (TypeScript diagnostics) ---- */
+.tab-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  margin-left: 2px;
+  padding: 0 5px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--color-white, #fff);
+}
+.tab-badge.hidden {
+  display: none;
+}
+.tab-badge.error {
+  background: var(--red);
+}
+.tab-badge.warning {
+  background: var(--yellow);
+}
+
+.diag-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 5px 10px;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.diag-row .diag-icon {
+  flex: none;
+  width: 13px;
+  height: 13px;
+  position: relative;
+  top: 2px;
+}
+.diag-row.error .diag-icon {
+  color: var(--red);
+}
+.diag-row.warning .diag-icon {
+  color: var(--yellow);
+}
+
+.diag-loc {
+  flex: none;
+  font-family: var(--mono);
+  color: var(--dim);
+  min-width: 42px;
+}
+
+.diag-code {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--dim);
+  opacity: 0.85;
+}
+
+.diag-msg {
+  flex: 1;
+  min-width: 0;
+  word-break: break-word;
+}
+
+/* Per-diagnostic Fix button: revealed on row hover to keep the list scannable. */
+.diag-fix {
+  flex: none;
+  align-self: center;
+  padding: 2px 7px;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.diag-row:hover .diag-fix,
+.diag-fix:focus-visible {
+  opacity: 1;
+}
+
 /* ---- Dev ---- */
 .dev-split {
   flex: 1;

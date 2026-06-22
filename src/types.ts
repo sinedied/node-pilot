@@ -15,6 +15,7 @@ export interface LaneAvailability {
   format: boolean;
   test: boolean;
   dev: boolean;
+  diagnostics: boolean;
 }
 
 export interface NoProjectDetection {
@@ -214,6 +215,35 @@ export interface DevState {
   pid: number | null;
   label?: string;
   _handle: ProcessHandle | null;
+}
+
+// ---- TypeScript language server (live diagnostics) ------------------------
+
+export type DiagnosticCategory = "error" | "warning" | "suggestion" | "message";
+
+export interface DiagnosticPosition {
+  line: number;
+  offset: number;
+}
+
+export interface Diagnostic {
+  file: string;
+  start: DiagnosticPosition;
+  end: DiagnosticPosition;
+  code: number | null;
+  category: DiagnosticCategory;
+  text: string;
+}
+
+export type TsLsStatus = "stopped" | "starting" | "analyzing" | "ready" | "error";
+
+export interface TsLsState {
+  status: TsLsStatus;
+  diagnostics: Diagnostic[];
+  errorCount: number;
+  warningCount: number;
+  lastUpdated: number | null;
+  reason: string | null;
 }
 
 // ---- Misc -----------------------------------------------------------------

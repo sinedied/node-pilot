@@ -105,6 +105,12 @@ async function handleApi(
       return sendJson(res, 200, await controller.refresh());
     case "POST /api/info/stats":
       return sendJson(res, 200, await controller.getProjectStats());
+    case "POST /api/diagnostics":
+      return sendJson(res, 200, await controller.getDiagnostics());
+    case "POST /api/diagnostics/fix": {
+      if (body.all) return sendJson(res, 200, await controller.fixAllDiagnostics());
+      return sendJson(res, 200, await controller.fixDiagnostic(body.diagnostic ?? null));
+    }
     case "POST /api/lane": {
       const id = body.id;
       controller.runLane(id, body).catch((e) => controller.log(String(e), "error"));

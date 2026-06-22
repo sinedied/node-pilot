@@ -15,6 +15,11 @@
           d="M1.705 8.005a.75.75 0 0 1 .834.656 5.5 5.5 0 0 0 9.592 2.97l-1.204-1.204a.25.25 0 0 1 .177-.427h3.646a.25.25 0 0 1 .25.25v3.646a.25.25 0 0 1-.427.177l-1.38-1.38A7.002 7.002 0 0 1 1.05 8.84a.75.75 0 0 1 .656-.834ZM8 2.5a5.487 5.487 0 0 0-4.131 1.869l1.204 1.204A.25.25 0 0 1 4.896 6H1.25A.25.25 0 0 1 1 5.75V2.104a.25.25 0 0 1 .427-.177l1.38 1.38A7.002 7.002 0 0 1 14.95 7.16a.75.75 0 0 1-1.49.178A5.5 5.5 0 0 0 8 2.5Z"
         />
       </symbol>
+      <symbol id="oct-alert" viewBox="0 0 16 16">
+        <path
+          d="M6.457 1.047c.659-1.234 2.427-1.234 3.086 0l6.082 11.38A1.75 1.75 0 0 1 14.082 15H1.918a1.75 1.75 0 0 1-1.543-2.573Zm1.763.707a.25.25 0 0 0-.44 0L1.698 13.132a.25.25 0 0 0 .22.368h12.164a.25.25 0 0 0 .22-.368Zm.53 3.996v2.5a.75.75 0 0 1-1.5 0v-2.5a.75.75 0 0 1 1.5 0ZM9 11a1 1 0 1 1-2 0 1 1 0 0 1 2 0Z"
+        />
+      </symbol>
       <symbol id="oct-tools" viewBox="0 0 16 16">
         <path
           d="M5.433 2.304A4.492 4.492 0 0 0 3.5 6c0 1.598.832 3.002 2.09 3.802.518.328.929.923.902 1.64v.008l-.164 3.337a.75.75 0 1 1-1.498-.073l.163-3.33c.002-.085-.05-.216-.207-.316A5.996 5.996 0 0 1 2 6a5.993 5.993 0 0 1 2.567-4.92 1.482 1.482 0 0 1 1.673-.04c.462.296.76.827.76 1.423v2.82c0 .082.041.16.11.206l.75.51a.25.25 0 0 0 .28 0l.75-.51A.249.249 0 0 0 9 5.282V2.463c0-.596.298-1.127.76-1.423a1.482 1.482 0 0 1 1.673.04A5.993 5.993 0 0 1 14 6a5.996 5.996 0 0 1-2.786 5.068c-.157.1-.209.23-.207.315l.163 3.33a.752.752 0 0 1-1.094.714.75.75 0 0 1-.404-.64l-.164-3.345c-.027-.717.384-1.312.902-1.64A4.495 4.495 0 0 0 12.5 6a4.492 4.492 0 0 0-1.933-3.696c-.024.017-.067.067-.067.16v2.818a1.75 1.75 0 0 1-.767 1.448l-.75.51a1.75 1.75 0 0 1-1.966 0l-.75-.51A1.75 1.75 0 0 1 5.5 5.282V2.463c0-.092-.043-.142-.067-.159Z"
@@ -165,6 +170,12 @@
       <button type="button" data-tab="console">
         <svg class="oi" aria-hidden="true"><use href="#oct-terminal" /></svg>Console
       </button>
+      <button type="button" data-tab="problems" id="tabbtn-problems">
+        <svg class="oi" aria-hidden="true"><use href="#oct-alert" /></svg>Problems<span
+          id="problems-badge"
+          class="tab-badge hidden"
+        ></span>
+      </button>
       <button type="button" data-tab="tests" id="tabbtn-tests">
         <svg class="oi" aria-hidden="true"><use href="#oct-beaker" /></svg>Tests
       </button>
@@ -213,6 +224,29 @@
           </button>
         </div>
         <pre id="console" class="console"></pre>
+      </section>
+
+      <!-- Problems (TypeScript language server diagnostics) -->
+      <section id="tab-problems" class="tab-panel">
+        <div class="panel-head">
+          <span id="problems-label" class="info-name">Problems</span>
+          <span id="problems-chips" class="chips"></span>
+          <span class="grow"></span>
+          <span id="problems-status" class="status-chip"></span>
+          <button type="button" id="problems-fix" class="fix-btn hidden">
+            <svg class="oi" aria-hidden="true"><use href="#oct-copilot" /></svg>Fix all with Copilot
+          </button>
+          <button type="button"
+            id="problems-refresh"
+            class="icon-btn"
+            title="Re-analyze the project"
+            aria-label="Refresh diagnostics"
+          >
+            <svg class="oi" aria-hidden="true"><use href="#oct-sync" /></svg>
+          </button>
+        </div>
+        <div id="problems-empty" class="empty"></div>
+        <div id="problems-groups" class="suites"></div>
       </section>
 
       <!-- Tests -->

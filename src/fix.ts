@@ -1,6 +1,7 @@
 // Build context-rich prompts that Cockpit.js hands back to the agent so it can
 // diagnose and fix a failure. Output is trimmed to keep prompts focused.
-import type { TestReport, UpdateFailure } from "./types.ts";
+import path from "node:path";
+import type { Diagnostic, TestReport, UpdateFailure } from "./types.ts";
 
 function tail(text: string | undefined, lines = 120): string {
   const arr = (text || "").split(/\r?\n/);
@@ -100,6 +101,41 @@ export function buildDepsFixPrompt({ failures, verifyStep, output }: DepsFixProm
   parts.push("", "Failure output (tail):", "```", tail(output, 150), "```", "");
   parts.push(
     "Review each package's breaking changes / migration notes, update the affected code, then re-run the safe update for these packages.",
+  );
+  return parts.join("\n");
+}
+
+export interface DiagnosticFixPromptInput {
+  cwd: string;
+  diagnostics: Diagnostic[];
+}
+
+// Build a Fix-with-Copilot prompt for one or more TypeScript diagnostics from
+// the live Problems panel. Locations are 1-based line:column with the TS error
+// code so the agent can jump straight to the source.
+export function buildDiagnosticFixPrompt({ cwd, diagnostics }: DiagnosticFixPromptInput): string {
+  const rel = (file: string) => {
+    const r = path.relative(cwd, file);
+    return r && !r.startsWith("..") ? r : file;
+  };
+  const single = diagnostics.length === 1;
+  const lines = diagnostics
+    .slice(0, 50)
+    .map((d) => {
+      const code = d.code ? `TS${d.code}` : d.category;
+      return `- ${rel(d.file)}:${d.start.line}:${d.start.offset} — ${code}: ${d.text}`;
+    })
+    .join("\n");
+  const parts = single
+    ? ["Please fix this TypeScript problem reported by Cockpit.js:", "", lines, ""]
+    : [
+        `Please fix these ${diagnostics.length} TypeScript problems reported by Cockpit.js:`,
+        "",
+        lines,
+        "",
+      ];
+  parts.push(
+    "These come from the project's own TypeScript language server (saved files on disk). Diagnose the root cause of each, make the minimal change to fix it, and keep the rest of the project type-safe.",
   );
   return parts.join("\n");
 }

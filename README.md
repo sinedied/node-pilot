@@ -24,6 +24,12 @@ capability is missing.
   and a one-click **Fix with Copilot** on failure.
 - **Test lane** — runs Vitest / Jest / `node:test` / Bun and renders a structured
   pass/fail report (summary chips, per-suite grouping, expandable stack traces).
+- **Live Problems panel** — an always-on, project-wide diagnostics view powered by
+  the project's own **TypeScript language server** (`tsserver`): errors + warnings
+  with file/line/column/TS-code/message, refreshed automatically as files change,
+  each with a **Fix with Copilot** action (plus a Fix-all). Complements the one-shot
+  `tsc --noEmit` Type-check lane with incremental, always-current diagnostics.
+  Hidden when the project has no TypeScript.
 - **Dev-server lane** — start/stop the dev server, auto-detect the served URL,
   preview it in an embedded panel, and stream HMR / compile errors.
 - **Dependency management (headline feature)** — outdated view grouped by
@@ -77,7 +83,8 @@ Node ≥ 22.18 (native type-stripping) and the UI is plain HTML/CSS/JS.
 Open the **Cockpit.js** canvas in the side panel. The status bar shows the detected
 setup; the tabs give you **Info** (project overview — stack, platform and
 dependency/size metrics — plus refresh / theme), **Console**
-(scripts + build/lint/format/type-check), **Tests**, **Dev** (server + preview) and
+(scripts + build/lint/format/type-check), **Problems** (live TypeScript
+diagnostics), **Tests**, **Dev** (server + preview) and
 **Dependencies** (outdated / audit / safe update). Every failing run offers **Fix with
 Copilot**.
 
@@ -88,9 +95,9 @@ _"run the tests"_, _"start the dev server"_, _"update all patch-level dependenci
 safely"\_. Available actions:
 
 `get_status` · `get_project_info` · `refresh` · `run_script` · `build_app` · `lint` ·
-`format` · `typecheck` · `run_tests` · `start_dev` · `stop_dev` · `get_dev_url` ·
-`get_logs` · `list_outdated` · `audit` · `update_dependencies` · `rollback_last_update` ·
-`fix_issue`.
+`format` · `typecheck` · `run_tests` · `get_diagnostics` · `start_dev` · `stop_dev` ·
+`get_dev_url` · `get_logs` · `list_outdated` · `audit` · `update_dependencies` ·
+`rollback_last_update` · `fix_issue`.
 
 ### Safe dependency updates
 
@@ -121,6 +128,8 @@ src/
   lanes.ts               build / lint / format / type-check / dev / test commands
   test-report.ts         parse Vitest / Jest / node:test / Bun output
   deps.ts                outdated / audit + safe-update loop + rollback
+  info.ts                lazy Info-tab metrics (transitive deps + sizes)
+  ts-server.ts           SDK-free tsserver client (live Problems diagnostics)
   controller.ts          central state + orchestration (+ SSE events)
   server.ts              http + SSE + static + /api endpoints
   actions.ts             agent-callable canvas actions
@@ -181,6 +190,10 @@ After editing the extension, reload it in the Copilot app (the runtime rediscove
   Bun); other runners fall back to raw output.
 - Outdated/audit JSON is parsed reliably for npm (and pnpm); yarn / bun degrade to a
   best-effort summary.
+- **Problems panel reflects saved files**, not unsaved editor buffers — the canvas is
+  not an editor, so the TypeScript language server analyzes what's on disk. It targets
+  the root project's `tsconfig`; project-reference / monorepo setups surface only the
+  root program for now.
 - **Theme** follows your OS appearance (via `prefers-color-scheme`), repainted with
   GitHub Primer colors, plus a manual Auto/Light/Dark toggle. The host does not expose
   its own in-app theme to canvas extensions, so OS appearance is the best automatic
@@ -193,7 +206,9 @@ After editing the extension, reload it in the Copilot app (the runtime rediscove
 
 Run-affected-tests, bundle-size analysis, coverage view, Node process metrics, flame
 graphs, env doctor, Node/engines & PM doctor, Lighthouse audit, richer embedded
-preview, monorepo orchestration, codemod runners, and persisted settings/state. See
+preview, semantic code navigation (references / definition / hover, building on the
+Problems panel's language server), monorepo orchestration, codemod runners, and
+persisted settings/state. See
 [`PLAN.md`](./PLAN.md) for the full design and roadmap.
 
 ## License

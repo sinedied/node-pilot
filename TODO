@@ -9,26 +9,28 @@ Instead of pills, extract proper information about the project. Suggest useful i
 - [x] UI: spinner when running/loading
 - [x] icons for tabs
 - [x] better UI: hint on hover/click
-
+- [x] dogfood all features
 
 - [ ] no disctinction in pinned script, default pinned scripts can be unpinned too
+  * improve: show which scripts it's aliased to
+  * order same as package.json
 
-- [x] dogfood all features
 - [ ] new AGENTS.md rule: ensure UI is responsive and usable at small widths
   * call /rubber-duck after each new set of changes after you're done
+  * tabs: ... for extra tabs not fitting in the tab bar
+
+- [ ] language server TS
+    * lint errors
+
+- [ ] debugger? + usuable by agent
 
 
-
-  * language server TS
-  * lint errors
-  * debugger?
-  * integrated browser + screen capture + playwright integration
+- [ ] integrated browser: improve integration
+ + screen capture + playwright integration
 
 - [ ] add skills (README for example)
 - [ ] logo
 - [ ] css
 
-- [ ] Rayfin sync agenda + notes
+- [ ] Rayfin integration (rayfin tab)
 
-- What will be the triggers supported in Functions? Does it includes scheduler?
-- Which identity is used to run the functions? Could we use the workspace identity / a specific identity? (use case call Fabric Admin API)
