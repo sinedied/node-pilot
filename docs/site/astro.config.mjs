@@ -12,6 +12,7 @@ export default defineConfig({
       title: "Cockpit.js",
       description:
         "A GitHub Copilot canvas extension that drives the JavaScript / Node.js / web inner loop from the Copilot app side panel.",
+      customCss: ["./src/styles/custom.css"],
       social: [
         {
           icon: "github",

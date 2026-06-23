@@ -1,0 +1,10 @@
+/* Splash hero title: clip a blue → violet gradient to the "Cockpit.js" text.
+   The stops are chosen to read well on both the light and dark Starlight
+   backgrounds, so no per-theme override is needed. */
+.hero h1 {
+  background-image: linear-gradient(120deg, #3b82f6 0%, #8b5cf6 55%, #c026d3 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}

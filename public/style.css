@@ -1211,37 +1211,141 @@ main {
 .dev-split {
   flex: 1;
   min-height: 0;
-  display: grid;
-  grid-template-rows: 1fr 160px;
-  gap: 8px;
+  display: flex;
+  flex-direction: column;
 }
 
 .preview {
+  flex: 1;
   width: 100%;
-  height: 100%;
+  min-height: 0;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: #fff;
 }
 
 .dev-split .console {
-  flex: none;
+  flex: 0 0 auto;
+  height: 160px;
+}
+
+/* Draggable handle between the preview and the logs. The global
+   `cursor: default !important` rule means we can't show a resize cursor, so the
+   handle communicates affordance visually (a grip that brightens on hover). */
+.dev-splitter {
+  flex: 0 0 auto;
+  height: 10px;
+  margin: 1px 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  touch-action: none;
+}
+
+.dev-splitter-grip {
+  width: 40px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--border);
+  transition: background 0.12s ease;
+}
+
+.dev-splitter:hover .dev-splitter-grip,
+.dev-splitter.dragging .dev-splitter-grip {
+  background: var(--accent);
+}
+
+.dev-split.logs-hidden .console,
+.dev-split.logs-hidden .dev-splitter {
+  display: none;
 }
 
 .dev-url {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  flex: 1 1 200px;
+  min-width: 0;
 }
 
-.dev-url a {
-  color: var(--accent);
+.url-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  padding: 5px 8px;
   font-family: var(--mono);
-  text-decoration: none;
+  font-size: 12px;
 }
 
-.dev-url a:hover {
-  text-decoration: underline;
+.url-input:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -1px;
+  border-color: var(--accent);
+}
+
+/* Toggle switch (Logs show/hide and similar on/off controls). */
+.switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  font-size: 12px;
+  color: var(--dim);
+  user-select: none;
+}
+
+.switch input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.switch-track {
+  position: relative;
+  width: 30px;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.switch-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--dim);
+  transition:
+    transform 0.15s ease,
+    background 0.15s ease;
+}
+
+.switch input:checked + .switch-track {
+  background: color-mix(in srgb, var(--accent) 30%, transparent);
+  border-color: var(--accent);
+}
+
+.switch input:checked + .switch-track .switch-thumb {
+  transform: translateX(12px);
+  background: var(--accent);
+}
+
+.switch input:focus-visible + .switch-track {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.switch-label {
+  color: var(--text);
 }
 
 /* ---- Dependencies ---- */
@@ -1331,4 +1435,115 @@ table.dep-table {
 .sev.clean {
   color: var(--green);
   border-color: var(--green);
+}
+
+/* ---- Fix-with-Copilot capture overlay ---- */
+.capture-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: color-mix(in srgb, #000 55%, transparent);
+}
+
+.capture-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  height: 100%;
+  max-width: 1100px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+  padding: 12px;
+}
+
+.capture-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.capture-head .oi {
+  color: var(--accent);
+}
+
+.capture-title {
+  font-weight: 600;
+}
+
+.capture-hint {
+  font-size: 12px;
+  color: var(--dim);
+}
+
+.capture-stage {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+#capture-canvas {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+}
+
+.capture-sel {
+  position: absolute;
+  border: 2px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  box-shadow: 0 0 0 9999px color-mix(in srgb, #000 40%, transparent);
+  pointer-events: none;
+}
+
+.capture-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.capture-foot .url-input {
+  flex: 1 1 240px;
+}
+
+/* ---- Toast ---- */
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  z-index: 120;
+  max-width: min(420px, calc(100vw - 24px));
+  padding: 8px 14px;
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 12px;
+  box-shadow: var(--shadow-sm);
+  opacity: 1;
+  transition: opacity 0.2s ease;
+}
+
+.toast.hidden {
+  opacity: 0;
+  pointer-events: none;
 }

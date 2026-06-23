@@ -28,7 +28,27 @@ async function sendToChat(prompt: string): Promise<void> {
   }
 }
 
-const controller = new Controller(cwd, { sendToChat });
+async function sendImageToChat(
+  prompt: string,
+  dataBase64: string,
+  mimeType: string,
+): Promise<void> {
+  if (!sessionRef) throw new Error("No active chat session.");
+  try {
+    await sessionRef.send({
+      prompt,
+      attachments: [{ type: "blob", data: dataBase64, mimeType, displayName: "preview.png" }],
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    await sessionRef.log?.(`Cockpit.js: failed to send screenshot: ${message}`, {
+      level: "error",
+    });
+    throw new Error(message);
+  }
+}
+
+const controller = new Controller(cwd, { sendToChat, sendImageToChat });
 
 // One loopback server per open canvas instance; they all share `controller`.
 const servers = new Map<string, Awaited<ReturnType<typeof startServer>>>();

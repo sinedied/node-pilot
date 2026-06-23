@@ -10,27 +10,27 @@ Instead of pills, extract proper information about the project. Suggest useful i
 - [x] icons for tabs
 - [x] better UI: hint on hover/click
 - [x] dogfood all features
+- [x] new AGENTS.md rule: ensure UI is responsive and usable at small widths
+  * call /rubber-duck after each new set of changes after you're done
+  * tabs: ... for extra tabs not fitting in the tab bar
 
 - [ ] no disctinction in pinned script, default pinned scripts can be unpinned too
   * improve: show which scripts it's aliased to
   * order same as package.json
 
-- [ ] new AGENTS.md rule: ensure UI is responsive and usable at small widths
-  * call /rubber-duck after each new set of changes after you're done
-  * tabs: ... for extra tabs not fitting in the tab bar
-
 - [ ] language server TS
     * lint errors
 
-- [ ] debugger? + usuable by agent
-
-
 - [ ] integrated browser: improve integration
  + screen capture + playwright integration
+
+- [ ] debugger? + usuable by agent
+
+- [ ] Rayfin integration (rayfin tab)
+
 
 - [ ] add skills (README for example)
 - [ ] logo
 - [ ] css
 
-- [ ] Rayfin integration (rayfin tab)
 

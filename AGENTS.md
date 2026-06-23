@@ -80,6 +80,18 @@ inspiration: [coffilot](https://github.com/jdubois/coffilot). Full design in
   state instead — `:hover` (bg/border/elevation), `:active` (slight `translateY(1px)`
   - darken = the click hint), and `:focus-visible` (accent focus ring) in
     `public/style.css`. Add affordances there; never reach for `cursor:`.
+- **The canvas webview is WebKit on macOS, not Chromium**: a live UA probe in the
+  real panel returned `AppleWebKit/605.1.15 (KHTML, like Gecko)` with no `Chrome`
+  token (WKWebView). On Windows the host uses WebView2/Chromium and on Linux
+  WebKitGTK/Chromium — so **target only standard, cross-engine web APIs**. Chromium-only
+  surfaces are unavailable on macOS: Region/Element Capture (`CropTarget`,
+  `RestrictionTarget`, `MediaStreamTrack.cropTo/restrictTo`) and `getViewportMedia` all
+  probed `false`. The dev-preview iframe loads the dev server (different host+port) and
+  is therefore **hard cross-origin** — `iframe.contentDocument` throws `SecurityError`,
+  so no DOM read / html2canvas of the live preview, and you can't inject into it. For
+  the "Fix with Copilot" screenshot we use plain `getDisplayMedia()` (works on all three
+  engines) + a manual crop, not element-targeted capture. When you need a browser API,
+  assume WebKit-grade support and verify cross-engine before relying on it.
 - **Settings persist server-side** in `~/.cockpit/settings.json` (keyed by project
   path), NOT in iframe `localStorage` — each canvas open gets a fresh loopback port,
   changing the origin and wiping `localStorage`. See `src/settings.ts`.

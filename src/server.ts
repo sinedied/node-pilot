@@ -25,19 +25,38 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
   res.end(data);
 }
 
+// Hard cap on POST body size (screenshots are the only large payload; the
+// client downscales first, this is just a safety net against runaway uploads).
+const MAX_BODY_BYTES = 16 * 1024 * 1024;
+
 // biome-ignore lint/suspicious/noExplicitAny: request bodies are arbitrary JSON, narrowed per-route below
 function readBody(req: IncomingMessage): Promise<any> {
   return new Promise((resolve) => {
     let data = "";
-    req.on("data", (c) => (data += c));
+    let size = 0;
+    let aborted = false;
+    req.on("data", (c) => {
+      if (aborted) return;
+      size += c.length;
+      if (size > MAX_BODY_BYTES) {
+        aborted = true;
+        resolve({ __oversize: true });
+        req.destroy();
+        return;
+      }
+      data += c;
+    });
     req.on("end", () => {
+      if (aborted) return;
       try {
         resolve(data ? JSON.parse(data) : {});
       } catch {
         resolve({});
       }
     });
-    req.on("error", () => resolve({}));
+    req.on("error", () => {
+      if (!aborted) resolve({});
+    });
   });
 }
 
@@ -94,6 +113,7 @@ async function handleApi(
   route: string,
 ): Promise<void> {
   const body = req.method === "POST" ? await readBody(req) : {};
+  if (body?.__oversize) return sendJson(res, 413, { ok: false, reason: "Payload too large." });
   switch (route) {
     case "GET /api/state":
       return sendJson(res, 200, controller.getState());
@@ -126,6 +146,13 @@ async function handleApi(
       return sendJson(res, 200, await controller.startDev());
     case "POST /api/dev/stop":
       return sendJson(res, 200, await controller.stopDev());
+    case "POST /api/dev/screenshot": {
+      const data = typeof body.data === "string" ? body.data : "";
+      if (!data) return sendJson(res, 400, { ok: false, reason: "No image data." });
+      const mimeType = typeof body.mimeType === "string" ? body.mimeType : "image/png";
+      const result = await controller.sendScreenshotToChat(body.prompt, data, mimeType);
+      return sendJson(res, result.ok ? 200 : 502, result);
+    }
     case "POST /api/deps/outdated":
       return sendJson(res, 200, await controller.listOutdated());
     case "POST /api/deps/audit":

@@ -44,6 +44,13 @@ let activeConsoleLane = null;
 const CONSOLE_LANES = new Set(["build", "lint", "format", "typecheck"]);
 const isConsoleLane = (id) => CONSOLE_LANES.has(id) || id.startsWith("script:");
 
+// ---- Dev browser state ----------------------------------------------------
+// The URL currently loaded in the preview iframe. Distinct from the dev
+// server's detected URL: once the server URL is known we seed the preview once,
+// then let the user navigate freely without state updates clobbering it.
+let devPreviewUrl = null;
+let consoleHeight = 160;
+
 // ---- API ------------------------------------------------------------------
 
 async function api(path, body) {
@@ -53,6 +60,16 @@ async function api(path, body) {
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   return res.json().catch(() => ({}));
+}
+
+let toastTimer = null;
+function toast(message) {
+  const el = $("#toast");
+  if (!el) return;
+  el.textContent = message;
+  el.classList.remove("hidden");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.add("hidden"), 3200);
 }
 
 // ---- Theme ----------------------------------------------------------------
@@ -1049,20 +1066,44 @@ function renderDev() {
 
   const urlWrap = $("#dev-url-wrap");
   const preview = $("#dev-preview");
-  if (dev.url) {
+  const urlInput = $("#dev-url");
+  const hasUrl = running && Boolean(dev.url);
+  if (hasUrl) {
     urlWrap.classList.remove("hidden");
-    const a = $("#dev-url");
-    a.textContent = dev.url;
-    a.href = dev.url;
-    if (preview.src !== dev.url) preview.src = dev.url;
+    // Seed the preview + URL bar once, the first time the server URL is known.
+    // Afterwards the user owns navigation; don't reset on every state update.
+    if (!devPreviewUrl) {
+      devPreviewUrl = dev.url;
+      preview.src = dev.url;
+    }
+    if (document.activeElement !== urlInput && urlInput.value === "") {
+      urlInput.value = devPreviewUrl;
+    }
     preview.classList.remove("hidden");
   } else {
     urlWrap.classList.add("hidden");
     preview.classList.add("hidden");
+    devPreviewUrl = null;
+    urlInput.value = "";
   }
+  // Capture + Logs controls only make sense while a preview is showing.
+  $("#dev-fix").classList.toggle("hidden", !hasUrl);
+  $("#dev-logs-toggle").classList.toggle("hidden", !hasUrl);
+  $("#dev-splitter").hidden = !hasUrl || !$("#dev-logs-check").checked;
+
   const c = $("#dev-console");
   c.textContent = strip(dev.output || "");
   c.scrollTop = c.scrollHeight;
+}
+
+// Normalize a user-typed URL and load it in the preview iframe.
+function navigatePreview(raw) {
+  let url = (raw || "").trim();
+  if (!url) return;
+  if (!/^[a-z]+:\/\//i.test(url)) url = `http://${url}`;
+  devPreviewUrl = url;
+  $("#dev-preview").src = url;
+  $("#dev-url").value = url;
 }
 
 // ---- Dependencies ---------------------------------------------------------
@@ -1332,8 +1373,269 @@ $("#dev-start").addEventListener("click", () => api("/api/dev/start", {}));
 $("#dev-stop").addEventListener("click", () => api("/api/dev/stop", {}));
 $("#dev-reload").addEventListener("click", () => {
   const p = $("#dev-preview");
-  // biome-ignore lint/correctness/noSelfAssign: reassigning iframe.src to the same URL forces a reload
-  if (p.src) p.src = p.src;
+  if (devPreviewUrl) {
+    p.src = devPreviewUrl;
+  } else if (p.src) {
+    // biome-ignore lint/correctness/noSelfAssign: reassigning iframe.src to the same URL forces a reload
+    p.src = p.src;
+  }
+});
+$("#dev-open-ext").addEventListener("click", () => {
+  const url = devPreviewUrl || $("#dev-url").value.trim();
+  if (url) window.open(url, "_blank", "noreferrer");
+});
+$("#dev-url").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    navigatePreview(e.currentTarget.value);
+    e.currentTarget.blur();
+  } else if (e.key === "Escape") {
+    e.currentTarget.value = devPreviewUrl || "";
+    e.currentTarget.blur();
+  }
+});
+$("#dev-url").addEventListener("blur", (e) => {
+  const v = e.currentTarget.value.trim();
+  if (v && v !== devPreviewUrl) navigatePreview(v);
+});
+
+// ---- Logs toggle + draggable splitter -------------------------------------
+function applyConsoleHeight() {
+  $("#dev-console").style.height = `${consoleHeight}px`;
+}
+$("#dev-logs-check").addEventListener("change", (e) => {
+  const hidden = !e.currentTarget.checked;
+  $("#dev-split").classList.toggle("logs-hidden", hidden);
+  $("#dev-splitter").hidden = hidden;
+});
+(function wireSplitter() {
+  const splitter = $("#dev-splitter");
+  const split = $("#dev-split");
+  let startY = 0;
+  let startH = 0;
+  const onMove = (e) => {
+    // Dragging up grows the console; clamp so neither pane collapses.
+    const dy = startY - e.clientY;
+    const max = split.clientHeight - 80;
+    consoleHeight = Math.max(60, Math.min(max, startH + dy));
+    applyConsoleHeight();
+  };
+  const onUp = () => {
+    splitter.classList.remove("dragging");
+    window.removeEventListener("pointermove", onMove);
+    window.removeEventListener("pointerup", onUp);
+    window.removeEventListener("pointercancel", onUp);
+    window.removeEventListener("blur", onUp);
+  };
+  splitter.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    startY = e.clientY;
+    startH = $("#dev-console").offsetHeight;
+    splitter.classList.add("dragging");
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+    window.addEventListener("blur", onUp);
+  });
+})();
+applyConsoleHeight();
+
+// ---- Fix with Copilot: screen capture + crop ------------------------------
+let captureCanvas = null;
+let captureSel = null; // { x, y, w, h } in canvas pixels, or null for full frame
+
+async function grabFrame() {
+  let stream;
+  try {
+    // Non-standard hints (preferCurrentTab, etc.) are honored on Chromium
+    // webviews and harmlessly ignored on WebKit; cast past the DOM lib types.
+    /** @type {any} */
+    const opts = {
+      video: { frameRate: 4 },
+      audio: false,
+      preferCurrentTab: true,
+      selfBrowserSurface: "include",
+      surfaceSwitching: "include",
+    };
+    stream = await navigator.mediaDevices.getDisplayMedia(opts);
+  } catch {
+    return null; // user cancelled or permission denied
+  }
+  const video = document.createElement("video");
+  video.muted = true;
+  video.playsInline = true;
+  // WebKit is finicky about playing an off-document video, so attach it hidden.
+  video.style.cssText = "position:fixed;left:-9999px;top:0;width:2px;height:2px;opacity:0;";
+  document.body.appendChild(video);
+  video.srcObject = stream;
+  try {
+    await video.play().catch(() => {});
+    await new Promise((resolve, reject) => {
+      const done = () => (video.videoWidth ? resolve() : reject(new Error("no frame")));
+      if (video.readyState >= 2 && video.videoWidth) return done();
+      video.addEventListener("loadeddata", done, { once: true });
+      setTimeout(() => (video.videoWidth ? resolve() : reject(new Error("timeout"))), 2000);
+    });
+    await new Promise((r) => requestAnimationFrame(() => r()));
+    const w = video.videoWidth;
+    const h = video.videoHeight;
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    canvas.getContext("2d").drawImage(video, 0, 0, w, h);
+    return canvas;
+  } catch {
+    return null;
+  } finally {
+    for (const t of stream.getTracks()) t.stop();
+    video.srcObject = null;
+    video.remove();
+  }
+}
+
+function openCapture(srcCanvas) {
+  captureCanvas = srcCanvas;
+  captureSel = null;
+  const overlay = $("#capture-overlay");
+  const dst = $("#capture-canvas");
+  dst.width = srcCanvas.width;
+  dst.height = srcCanvas.height;
+  dst.getContext("2d").drawImage(srcCanvas, 0, 0);
+  $("#capture-sel").classList.add("hidden");
+  $("#capture-prompt").value = "";
+  overlay.classList.remove("hidden");
+}
+
+function closeCapture() {
+  $("#capture-overlay").classList.add("hidden");
+  captureCanvas = null;
+  captureSel = null;
+}
+
+(function wireCaptureSelection() {
+  const dst = $("#capture-canvas");
+  const selBox = $("#capture-sel");
+  const stage = $("#capture-stage");
+  let dragging = false;
+  let originX = 0;
+  let originY = 0;
+
+  // Clamp the drag (two client-space points) to the visible canvas rect.
+  const clampedRect = (ax, ay, bx, by) => {
+    const r = dst.getBoundingClientRect();
+    const left = Math.max(r.left, Math.min(ax, bx));
+    const top = Math.max(r.top, Math.min(ay, by));
+    const right = Math.min(r.right, Math.max(ax, bx));
+    const bottom = Math.min(r.bottom, Math.max(ay, by));
+    return { r, left, top, width: Math.max(0, right - left), height: Math.max(0, bottom - top) };
+  };
+
+  const draw = (box) => {
+    const stageRect = stage.getBoundingClientRect();
+    selBox.style.left = `${box.left - stageRect.left}px`;
+    selBox.style.top = `${box.top - stageRect.top}px`;
+    selBox.style.width = `${box.width}px`;
+    selBox.style.height = `${box.height}px`;
+  };
+
+  dst.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    dragging = true;
+    originX = e.clientX;
+    originY = e.clientY;
+    selBox.classList.remove("hidden");
+    draw(clampedRect(originX, originY, originX, originY));
+    dst.setPointerCapture(e.pointerId);
+  });
+  dst.addEventListener("pointermove", (e) => {
+    if (!dragging) return;
+    draw(clampedRect(originX, originY, e.clientX, e.clientY));
+  });
+  const finish = (e) => {
+    if (!dragging) return;
+    dragging = false;
+    const box = clampedRect(originX, originY, e.clientX, e.clientY);
+    if (box.width < 8 || box.height < 8) {
+      // Treat a click/tiny drag as "clear selection" (send full frame).
+      captureSel = null;
+      selBox.classList.add("hidden");
+      return;
+    }
+    const scaleX = dst.width / box.r.width;
+    const scaleY = dst.height / box.r.height;
+    const x = Math.round((box.left - box.r.left) * scaleX);
+    const y = Math.round((box.top - box.r.top) * scaleY);
+    captureSel = {
+      x,
+      y,
+      w: Math.min(Math.round(box.width * scaleX), dst.width - x),
+      h: Math.min(Math.round(box.height * scaleY), dst.height - y),
+    };
+  };
+  dst.addEventListener("pointerup", finish);
+  dst.addEventListener("pointercancel", () => {
+    dragging = false;
+  });
+})();
+
+$("#dev-fix").addEventListener("click", async (e) => {
+  const btn = e.currentTarget;
+  btn.disabled = true;
+  try {
+    const frame = await grabFrame();
+    if (!frame) {
+      toast("Screen capture was cancelled or not permitted.");
+      return;
+    }
+    openCapture(frame);
+  } finally {
+    btn.disabled = false;
+  }
+});
+$("#capture-full").addEventListener("click", () => {
+  captureSel = null;
+  $("#capture-sel").classList.add("hidden");
+});
+$("#capture-cancel").addEventListener("click", closeCapture);
+$("#capture-overlay").addEventListener("pointerdown", (e) => {
+  if (e.target === $("#capture-overlay")) closeCapture();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !$("#capture-overlay").classList.contains("hidden")) closeCapture();
+});
+$("#capture-send").addEventListener("click", async (e) => {
+  if (!captureCanvas) return;
+  const btn = e.currentTarget;
+  btn.disabled = true;
+  try {
+    const sel = captureSel;
+    const sx = sel ? sel.x : 0;
+    const sy = sel ? sel.y : 0;
+    const sw = sel ? sel.w : captureCanvas.width;
+    const sh = sel ? sel.h : captureCanvas.height;
+    // Cap the longest edge so a Retina/full-screen grab doesn't produce a huge
+    // base64 payload; keeps the chat attachment focused and small.
+    const MAX_EDGE = 2048;
+    const scale = Math.min(1, MAX_EDGE / Math.max(sw, sh));
+    const out = document.createElement("canvas");
+    out.width = Math.max(1, Math.round(sw * scale));
+    out.height = Math.max(1, Math.round(sh * scale));
+    out.getContext("2d").drawImage(captureCanvas, sx, sy, sw, sh, 0, 0, out.width, out.height);
+    const dataUrl = out.toDataURL("image/png");
+    const data = dataUrl.slice(dataUrl.indexOf(",") + 1);
+    const prompt = $("#capture-prompt").value.trim();
+    const res = await api("/api/dev/screenshot", { data, mimeType: "image/png", prompt });
+    closeCapture();
+    toast(
+      res?.ok === false
+        ? `Couldn't send screenshot: ${res.reason || "error"}`
+        : "Screenshot sent to Copilot.",
+    );
+  } catch (err) {
+    toast(`Screenshot failed: ${err}`);
+  } finally {
+    btn.disabled = false;
+  }
 });
 
 $("#deps-check").addEventListener("click", async (e) => {

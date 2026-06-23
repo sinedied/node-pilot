@@ -45,7 +45,17 @@ declare module "@github/copilot-sdk/extension" {
 
   export interface CopilotSession {
     log(message: string, options?: { level?: string }): Promise<void>;
-    send(message: { prompt: string }): Promise<void>;
+    send(message: {
+      prompt: string;
+      attachments?: Array<{
+        type: "file" | "directory" | "selection" | "blob";
+        data?: string;
+        mimeType?: string;
+        displayName?: string;
+        path?: string;
+      }>;
+      mode?: "enqueue" | "immediate";
+    }): Promise<void>;
   }
 
   export interface JoinSessionConfig {

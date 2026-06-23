@@ -75,6 +75,7 @@ const TS_IDLE_MS = 10 * 60 * 1000;
 
 export interface ControllerOptions {
   sendToChat?: (prompt: string) => Promise<void> | void;
+  sendImageToChat?: (prompt: string, dataBase64: string, mimeType: string) => Promise<void> | void;
 }
 
 interface LaneRunResult {
@@ -86,6 +87,7 @@ interface LaneRunResult {
 export class Controller {
   cwd: string;
   sendToChat: (prompt: string) => Promise<void> | void;
+  sendImageToChat: (prompt: string, dataBase64: string, mimeType: string) => Promise<void> | void;
   events: EventEmitter;
   detection: Detection | null;
   lanes: Record<string, LaneState>;
@@ -102,9 +104,10 @@ export class Controller {
   _tsRestartTimer: NodeJS.Timeout | null;
   _tsIdleTimer: NodeJS.Timeout | null;
 
-  constructor(cwd: string, { sendToChat }: ControllerOptions = {}) {
+  constructor(cwd: string, { sendToChat, sendImageToChat }: ControllerOptions = {}) {
     this.cwd = cwd;
     this.sendToChat = sendToChat || (async () => {});
+    this.sendImageToChat = sendImageToChat || (async () => {});
     this.events = new EventEmitter();
     this.events.setMaxListeners(100);
     this.detection = null;
@@ -713,6 +716,27 @@ export class Controller {
 
   async sendPromptToChat(prompt: string): Promise<void> {
     await this.sendToChat(prompt);
+  }
+
+  // Send a captured screenshot of the running app to the chat, with an optional
+  // user prompt. Falls back to a sensible default prompt when none is given.
+  async sendScreenshotToChat(
+    prompt: string | undefined,
+    dataBase64: string,
+    mimeType = "image/png",
+  ): Promise<{ ok: boolean; reason?: string }> {
+    const text = prompt?.trim()
+      ? prompt.trim()
+      : "Here's a screenshot of my running app. Help me find and fix the UI issue shown.";
+    try {
+      await this.sendImageToChat(text, dataBase64, mimeType);
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      this.log(`Couldn't send screenshot: ${reason}`, "error");
+      return { ok: false, reason };
+    }
+    this.log("Sent a screenshot to Copilot.");
+    return { ok: true };
   }
 
   // Push a single diagnostic (or all current ones) to the chat as a Fix prompt.
