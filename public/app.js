@@ -53,8 +53,13 @@ let consoleHeight = 160;
 
 // ---- API ------------------------------------------------------------------
 
+// The canvas UI is served under this base path (the server reverse-proxies every
+// other path to the dev server so the preview is same-origin). Keep in sync with
+// BASE in src/server.ts.
+const BASE = "/__cockpit";
+
 async function api(path, body) {
-  const res = await fetch(path, {
+  const res = await fetch(BASE + path, {
     method: body === undefined ? "GET" : "POST",
     headers: { "Content-Type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -1050,6 +1055,35 @@ function renderProblemsBody() {
 
 // ---- Dev ------------------------------------------------------------------
 
+// The preview iframe is served same-origin through the canvas server's reverse
+// proxy, so the URL loaded in the iframe (canvas origin) differs from the dev
+// server's real URL. We show the *real* URL in the URL bar / use it for
+// open-external, and map to the proxied URL when loading the iframe.
+function devRealOrigin() {
+  try {
+    return state.dev?.url ? new URL(state.dev.url).origin : null;
+  } catch {
+    return null;
+  }
+}
+function toProxy(realUrl) {
+  try {
+    const u = new URL(realUrl, state.dev?.url || location.origin);
+    return location.origin + u.pathname + u.search + u.hash;
+  } catch {
+    return realUrl;
+  }
+}
+function toReal(proxyUrl) {
+  const base = devRealOrigin();
+  try {
+    const u = new URL(proxyUrl, location.origin);
+    return (base || location.origin) + u.pathname + u.search + u.hash;
+  } catch {
+    return proxyUrl;
+  }
+}
+
 function renderDev() {
   const dev = state.dev;
   const running = dev.status === "running";
@@ -1074,7 +1108,7 @@ function renderDev() {
     // Afterwards the user owns navigation; don't reset on every state update.
     if (!devPreviewUrl) {
       devPreviewUrl = dev.url;
-      preview.src = dev.url;
+      preview.src = toProxy(dev.url);
     }
     if (document.activeElement !== urlInput && urlInput.value === "") {
       urlInput.value = devPreviewUrl;
@@ -1096,13 +1130,18 @@ function renderDev() {
   c.scrollTop = c.scrollHeight;
 }
 
-// Normalize a user-typed URL and load it in the preview iframe.
+// Normalize a user-typed URL and load it in the preview iframe (via the proxy).
 function navigatePreview(raw) {
   let url = (raw || "").trim();
   if (!url) return;
-  if (!/^[a-z]+:\/\//i.test(url)) url = `http://${url}`;
+  const origin = devRealOrigin();
+  if (url.startsWith("/") && origin) {
+    url = origin + url; // bare path → real dev URL
+  } else if (!/^[a-z]+:\/\//i.test(url)) {
+    url = `http://${url}`;
+  }
   devPreviewUrl = url;
-  $("#dev-preview").src = url;
+  $("#dev-preview").src = toProxy(url);
   $("#dev-url").value = url;
 }
 
@@ -1309,7 +1348,7 @@ function applyEvent(e) {
 }
 
 function connect() {
-  const es = new EventSource("/events");
+  const es = new EventSource(BASE + "/events");
   es.onmessage = (m) => {
     try {
       applyEvent(JSON.parse(m.data));
@@ -1374,11 +1413,27 @@ $("#dev-stop").addEventListener("click", () => api("/api/dev/stop", {}));
 $("#dev-reload").addEventListener("click", () => {
   const p = $("#dev-preview");
   if (devPreviewUrl) {
-    p.src = devPreviewUrl;
+    p.src = toProxy(devPreviewUrl);
   } else if (p.src) {
     // biome-ignore lint/correctness/noSelfAssign: reassigning iframe.src to the same URL forces a reload
     p.src = p.src;
   }
+});
+// The preview is same-origin (proxied), so we can read its location after
+// in-iframe navigation and reflect the *real* dev URL back into the URL bar.
+$("#dev-preview").addEventListener("load", () => {
+  const p = $("#dev-preview");
+  let href;
+  try {
+    href = p.contentWindow?.location?.href;
+  } catch {
+    return; // genuinely cross-origin (e.g. external link) → leave the bar as-is
+  }
+  if (!href || href === "about:blank" || !href.startsWith(location.origin)) return;
+  const real = toReal(href);
+  devPreviewUrl = real;
+  const input = $("#dev-url");
+  if (document.activeElement !== input) input.value = real;
 });
 $("#dev-open-ext").addEventListener("click", () => {
   const url = devPreviewUrl || $("#dev-url").value.trim();
@@ -1440,57 +1495,55 @@ $("#dev-logs-check").addEventListener("change", (e) => {
 })();
 applyConsoleHeight();
 
-// ---- Fix with Copilot: screen capture + crop ------------------------------
+// ---- Fix with Copilot: in-page capture + crop -----------------------------
 let captureCanvas = null;
 let captureSel = null; // { x, y, w, h } in canvas pixels, or null for full frame
 
-async function grabFrame() {
-  let stream;
-  try {
-    // Non-standard hints (preferCurrentTab, etc.) are honored on Chromium
-    // webviews and harmlessly ignored on WebKit; cast past the DOM lib types.
-    /** @type {any} */
-    const opts = {
-      video: { frameRate: 4 },
-      audio: false,
-      preferCurrentTab: true,
-      selfBrowserSurface: "include",
-      surfaceSwitching: "include",
+// Ask the injected bridge (public/preview-capture.js, running inside the
+// same-origin proxied preview) to rasterize the page and return a PNG dataURL.
+function captureViaIframe() {
+  const preview = $("#dev-preview");
+  const win = preview?.contentWindow;
+  if (!win) return Promise.resolve({ error: "no-frame" });
+  return new Promise((resolve) => {
+    const id = Math.random().toString(36).slice(2);
+    const timer = setTimeout(() => {
+      window.removeEventListener("message", onMsg);
+      resolve({ error: "timeout" });
+    }, 20000);
+    function onMsg(ev) {
+      if (ev.source !== win || ev.origin !== location.origin) return;
+      const d = ev.data;
+      if (!d || d.type !== "cockpit:capture:result" || d.id !== id) return;
+      clearTimeout(timer);
+      window.removeEventListener("message", onMsg);
+      resolve(d);
+    }
+    window.addEventListener("message", onMsg);
+    try {
+      win.postMessage({ type: "cockpit:capture", id }, location.origin);
+    } catch {
+      clearTimeout(timer);
+      window.removeEventListener("message", onMsg);
+      resolve({ error: "post-failed" });
+    }
+  });
+}
+
+// Decode a PNG dataURL into a canvas (the crop overlay operates on pixels).
+function dataUrlToCanvas(dataUrl) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const c = document.createElement("canvas");
+      c.width = img.naturalWidth || 1;
+      c.height = img.naturalHeight || 1;
+      c.getContext("2d").drawImage(img, 0, 0);
+      resolve(c);
     };
-    stream = await navigator.mediaDevices.getDisplayMedia(opts);
-  } catch {
-    return null; // user cancelled or permission denied
-  }
-  const video = document.createElement("video");
-  video.muted = true;
-  video.playsInline = true;
-  // WebKit is finicky about playing an off-document video, so attach it hidden.
-  video.style.cssText = "position:fixed;left:-9999px;top:0;width:2px;height:2px;opacity:0;";
-  document.body.appendChild(video);
-  video.srcObject = stream;
-  try {
-    await video.play().catch(() => {});
-    await new Promise((resolve, reject) => {
-      const done = () => (video.videoWidth ? resolve() : reject(new Error("no frame")));
-      if (video.readyState >= 2 && video.videoWidth) return done();
-      video.addEventListener("loadeddata", done, { once: true });
-      setTimeout(() => (video.videoWidth ? resolve() : reject(new Error("timeout"))), 2000);
-    });
-    await new Promise((r) => requestAnimationFrame(() => r()));
-    const w = video.videoWidth;
-    const h = video.videoHeight;
-    const canvas = document.createElement("canvas");
-    canvas.width = w;
-    canvas.height = h;
-    canvas.getContext("2d").drawImage(video, 0, 0, w, h);
-    return canvas;
-  } catch {
-    return null;
-  } finally {
-    for (const t of stream.getTracks()) t.stop();
-    video.srcObject = null;
-    video.remove();
-  }
+    img.onerror = () => reject(new Error("decode failed"));
+    img.src = dataUrl;
+  });
 }
 
 function openCapture(srcCanvas) {
@@ -1581,15 +1634,21 @@ function closeCapture() {
 $("#dev-fix").addEventListener("click", async (e) => {
   const btn = e.currentTarget;
   btn.disabled = true;
+  const prev = btn.innerHTML;
+  btn.innerHTML = `<svg class="oi spin"><use href="#oct-sync" /></svg>`;
   try {
-    const frame = await grabFrame();
-    if (!frame) {
-      toast("Screen capture was cancelled or not permitted.");
+    const r = await captureViaIframe();
+    if (r.error || !r.dataUrl) {
+      toast(r.error === "timeout" ? "Capture timed out." : "Couldn't capture the preview.");
       return;
     }
-    openCapture(frame);
+    const canvas = await dataUrlToCanvas(r.dataUrl);
+    openCapture(canvas);
+  } catch (err) {
+    toast(`Capture failed: ${err}`);
   } finally {
     btn.disabled = false;
+    btn.innerHTML = prev;
   }
 });
 $("#capture-full").addEventListener("click", () => {

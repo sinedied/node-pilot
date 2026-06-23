@@ -14,6 +14,9 @@ Instead of pills, extract proper information about the project. Suggest useful i
   * call /rubber-duck after each new set of changes after you're done
   * tabs: ... for extra tabs not fitting in the tab bar
 
+- [ ] test: watch switch, logs switch instead of raw output (like dev tab)
+
+
 - [ ] no disctinction in pinned script, default pinned scripts can be unpinned too
   * improve: show which scripts it's aliased to
   * order same as package.json

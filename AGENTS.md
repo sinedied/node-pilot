@@ -31,6 +31,8 @@ inspiration: [coffilot](https://github.com/jdubois/coffilot). Full design in
   Dependencies tabs),
   GitHub Primer light/dark theming + inline Octicon sprite (MIT, bundled, no network).
   `public/app.js` stays JS, type-checked via `tsconfig.client.json` (`checkJs`).
+  `public/preview-capture.js` is the capture bridge injected into the proxied preview;
+  `public/vendor/snapdom.min.js` is the vendored rasterizer it uses (see gotcha below).
 - `test/` — Vitest specs (`core.test.ts`, `deps.test.ts`, `info.test.ts`,
   `settings.test.ts`, `ts-server.test.ts`). `scripts/smoke.mjs`
   dynamically imports every SDK-free `src/*.ts` to prove native type-stripping loads.
@@ -85,13 +87,36 @@ inspiration: [coffilot](https://github.com/jdubois/coffilot). Full design in
   token (WKWebView). On Windows the host uses WebView2/Chromium and on Linux
   WebKitGTK/Chromium — so **target only standard, cross-engine web APIs**. Chromium-only
   surfaces are unavailable on macOS: Region/Element Capture (`CropTarget`,
-  `RestrictionTarget`, `MediaStreamTrack.cropTo/restrictTo`) and `getViewportMedia` all
-  probed `false`. The dev-preview iframe loads the dev server (different host+port) and
-  is therefore **hard cross-origin** — `iframe.contentDocument` throws `SecurityError`,
-  so no DOM read / html2canvas of the live preview, and you can't inject into it. For
-  the "Fix with Copilot" screenshot we use plain `getDisplayMedia()` (works on all three
-  engines) + a manual crop, not element-targeted capture. When you need a browser API,
-  assume WebKit-grade support and verify cross-engine before relying on it.
+  `RestrictionTarget`, `MediaStreamTrack.cropTo/restrictTo`), `getViewportMedia` and
+  reliable `getDisplayMedia` self-capture all probed `false` / capture the whole app
+  window. When you need a browser API, assume WebKit-grade support and verify
+  cross-engine before relying on it.
+- **Same-origin preview proxy (the key dev-server trick)**: the canvas server
+  (`src/server.ts`) serves the UI under the base path `/__cockpit/` and **reverse-proxies
+  every other path to the running dev server** (`controller.dev.url`). So the preview
+  iframe loads `http://127.0.0.1:<port>/…` — the *canvas origin* — not the dev server's
+  own host:port. That makes the iframe **same-origin** with the canvas, which is what
+  lets "Fix with Copilot" capture just the website (no `getDisplayMedia`, no OS prompt):
+  - The proxy strips `content-security-policy*` + `x-frame-options` (so framing +
+    injection work), requests `identity` encoding, and injects two `<script>`s into
+    proxied HTML before `</head>`: the vendored rasterizer + `public/preview-capture.js`.
+    It also proxies `upgrade` (WebSocket) requests so dev-server HMR keeps working.
+  - Capture flow: `#dev-fix` → parent `postMessage({type:'cockpit:capture'})` to the
+    iframe → `preview-capture.js` rasterizes `document.documentElement` with snapdom →
+    PNG dataURL → reply → existing crop overlay (rectangle + prompt) → POST
+    `/api/dev/screenshot` (unchanged). Full document height is captured, not just the
+    viewport. URL bar shows the *real* dev URL; `app.js` maps real↔proxy
+    (`toProxy`/`toReal`) for navigation, reload and open-external.
+  - Limits: proxy fidelity is scoped to dogfooding the project's own Astro site —
+    dev servers that hard-code their absolute origin, exotic auth/cookies, or non-HTTP
+    HMR may not round-trip; the manual URL bar + open-external still work.
+- **Vendored client lib exception**: the UI is otherwise dependency-free vanilla JS, but
+  `public/vendor/snapdom.min.js` (SnapDOM, MIT, self-contained, no sub-deps) is a
+  deliberate, user-approved exception — it's the in-page rasterizer for the capture flow
+  above. It's git-ignored from Biome (`!public/vendor` in `biome.json`) and not
+  type-checked (`tsconfig.client.json` only includes `public/app.js`). Keep new client
+  libs out unless there's an equally strong reason; if you add one, vendor a single
+  self-contained file here and document why.
 - **Settings persist server-side** in `~/.cockpit/settings.json` (keyed by project
   path), NOT in iframe `localStorage` — each canvas open gets a fresh loopback port,
   changing the origin and wiping `localStorage`. See `src/settings.ts`.
