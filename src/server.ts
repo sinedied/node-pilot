@@ -139,6 +139,8 @@ async function handleApi(
       return sendJson(res, 200, await controller.getProjectStats());
     case "POST /api/diagnostics":
       return sendJson(res, 200, await controller.getDiagnostics());
+    case "POST /api/lint":
+      return sendJson(res, 200, await controller.getLintDiagnostics());
     case "POST /api/diagnostics/fix": {
       if (body.all) return sendJson(res, 200, await controller.fixAllDiagnostics());
       return sendJson(res, 200, await controller.fixDiagnostic(body.diagnostic ?? null));

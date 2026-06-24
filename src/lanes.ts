@@ -7,6 +7,7 @@ import type {
   Detection,
   LaneAvailability,
   LaneResult,
+  LintResolution,
   PinnedTask,
   ProjectDetection,
 } from "./types.ts";
@@ -60,6 +61,32 @@ export function resolveLint(d: ProjectDetection, { fix = false } = {}): LaneResu
       argv: exec(d.pm, ["oxlint", ...(fix ? ["--fix"] : [])]),
     };
   if (script) return { label: `${d.pm} run ${script}`, argv: runScript(d.pm, script) };
+  return { unavailable: true, reason: "No linter (eslint / biome / oxlint) detected." };
+}
+
+// Resolve the linter to a machine-readable command, independent of any pinned
+// lint script — the Problems panel needs a known JSON reporter to parse, which a
+// package.json `lint` script can't be assumed to produce. Mirrors resolveLint's
+// linter precedence (biome / eslint / oxlint).
+export function resolveLintJson(d: ProjectDetection): LintResolution {
+  if (d.linter === "biome")
+    return {
+      label: "biome lint --reporter=json .",
+      argv: exec(d.pm, ["biome", "lint", "--reporter=json", "."]),
+      parser: "biome",
+    };
+  if (d.linter === "eslint")
+    return {
+      label: "eslint . --format json",
+      argv: exec(d.pm, ["eslint", ".", "--format", "json"]),
+      parser: "eslint",
+    };
+  if (d.linter === "oxlint")
+    return {
+      label: "oxlint --format=json",
+      argv: exec(d.pm, ["oxlint", "--format=json"]),
+      parser: "oxlint",
+    };
   return { unavailable: true, reason: "No linter (eslint / biome / oxlint) detected." };
 }
 

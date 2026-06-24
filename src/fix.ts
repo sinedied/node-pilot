@@ -110,32 +110,43 @@ export interface DiagnosticFixPromptInput {
   diagnostics: Diagnostic[];
 }
 
-// Build a Fix-with-Copilot prompt for one or more TypeScript diagnostics from
-// the live Problems panel. Locations are 1-based line:column with the TS error
-// code so the agent can jump straight to the source.
+// Build a Fix-with-Copilot prompt for one or more problems from the live Problems
+// panel — TypeScript diagnostics, linter findings, or a mix. Locations are 1-based
+// line:column with the TS error code or lint rule so the agent can jump straight
+// to the source.
 export function buildDiagnosticFixPrompt({ cwd, diagnostics }: DiagnosticFixPromptInput): string {
   const rel = (file: string) => {
     const r = path.relative(cwd, file);
     return r && !r.startsWith("..") ? r : file;
   };
+  const tag = (d: Diagnostic) => {
+    if (d.source === "lint") return d.rule ? `lint(${d.rule})` : "lint";
+    return d.code ? `TS${d.code}` : d.category;
+  };
+  const hasTs = diagnostics.some((d) => d.source !== "lint");
+  const hasLint = diagnostics.some((d) => d.source === "lint");
+  const kind = hasTs && hasLint ? "TypeScript + lint" : hasLint ? "lint" : "TypeScript";
   const single = diagnostics.length === 1;
   const lines = diagnostics
     .slice(0, 50)
-    .map((d) => {
-      const code = d.code ? `TS${d.code}` : d.category;
-      return `- ${rel(d.file)}:${d.start.line}:${d.start.offset} — ${code}: ${d.text}`;
-    })
+    .map((d) => `- ${rel(d.file)}:${d.start.line}:${d.start.offset} — ${tag(d)}: ${d.text}`)
     .join("\n");
   const parts = single
-    ? ["Please fix this TypeScript problem reported by Cockpit.js:", "", lines, ""]
+    ? [`Please fix this ${kind} problem reported by Cockpit.js:`, "", lines, ""]
     : [
-        `Please fix these ${diagnostics.length} TypeScript problems reported by Cockpit.js:`,
+        `Please fix these ${diagnostics.length} ${kind} problems reported by Cockpit.js:`,
         "",
         lines,
         "",
       ];
+  const sources = [
+    hasTs ? "the project's own TypeScript language server" : null,
+    hasLint ? "the project's linter" : null,
+  ]
+    .filter(Boolean)
+    .join(" and ");
   parts.push(
-    "These come from the project's own TypeScript language server (saved files on disk). Diagnose the root cause of each, make the minimal change to fix it, and keep the rest of the project type-safe.",
+    `These come from ${sources} (saved files on disk). Diagnose the root cause of each, make the minimal change to fix it, and keep the rest of the project type-safe and lint-clean.`,
   );
   return parts.join("\n");
 }

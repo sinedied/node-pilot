@@ -55,6 +55,8 @@ export function run(
     }
 
     let output = "";
+    let stdout = "";
+    let stderr = "";
     onStart?.(child);
 
     const handle = (buf: Buffer) => {
@@ -62,8 +64,14 @@ export function run(
       output += text;
       onData?.(text);
     };
-    child.stdout?.on("data", handle);
-    child.stderr?.on("data", handle);
+    child.stdout?.on("data", (buf: Buffer) => {
+      stdout += buf.toString();
+      handle(buf);
+    });
+    child.stderr?.on("data", (buf: Buffer) => {
+      stderr += buf.toString();
+      handle(buf);
+    });
 
     child.on("error", (err) => {
       const text = `\nProcess error: ${err.message}\n`;
@@ -71,7 +79,7 @@ export function run(
       onData?.(text);
     });
     child.on("close", (code, signal) => {
-      resolve({ code: code ?? -1, signal, output });
+      resolve({ code: code ?? -1, signal, output, stdout, stderr });
     });
   });
 }

@@ -13,10 +13,12 @@ import {
   resolveLane,
   resolveDev,
   resolveTest,
+  resolveLintJson,
   laneAvailability,
   defaultPinnedTasks,
 } from "./lanes.ts";
 import { parseJestLike, parseTap, parseTextCounts } from "./test-report.ts";
+import { parseLint, sortDiagnostics } from "./lint-report.ts";
 import { pushCapped, extractUrl, isPortInUse } from "./util.ts";
 import { buildFixPrompt, buildTestFixPrompt, buildDiagnosticFixPrompt } from "./fix.ts";
 import { TsServerClient, resolveTsserverPath } from "./ts-server.ts";
@@ -33,6 +35,7 @@ import type {
   Diagnostic,
   FixContextEntry,
   LaneState,
+  LintState,
   ProcessHandle,
   ProjectStats,
   ResolvedSettings,
@@ -113,11 +116,16 @@ export class Controller {
   projectStats: ProjectStats | null;
   _statsPromise: Promise<ProjectStats> | null;
   tsLs: TsLsState;
+  lint: LintState;
   _tsClient: TsServerClient | null;
   _tsWatchers: FSWatcher[];
   _tsRefreshTimer: NodeJS.Timeout | null;
   _tsRestartTimer: NodeJS.Timeout | null;
   _tsIdleTimer: NodeJS.Timeout | null;
+  _lintRefreshTimer: NodeJS.Timeout | null;
+  _lintRunning: Promise<void> | null;
+  _lintDirty: boolean;
+  _lintGen: number;
   _testWatch: TestWatchSession | null;
   _autoRanFor: Set<string>;
   _autoRunning: boolean;
@@ -138,11 +146,16 @@ export class Controller {
     this.projectStats = null;
     this._statsPromise = null;
     this.tsLs = this.freshTsLs();
+    this.lint = this.freshLint();
     this._tsClient = null;
     this._tsWatchers = [];
     this._tsRefreshTimer = null;
     this._tsRestartTimer = null;
     this._tsIdleTimer = null;
+    this._lintRefreshTimer = null;
+    this._lintRunning = null;
+    this._lintDirty = false;
+    this._lintGen = 0;
     this._testWatch = null;
     this._autoRanFor = new Set();
     this._autoRunning = false;
@@ -154,6 +167,18 @@ export class Controller {
       diagnostics: [],
       errorCount: 0,
       warningCount: 0,
+      lastUpdated: null,
+      reason: null,
+    };
+  }
+
+  freshLint(): LintState {
+    return {
+      status: "idle",
+      diagnostics: [],
+      errorCount: 0,
+      warningCount: 0,
+      infoCount: 0,
       lastUpdated: null,
       reason: null,
     };
@@ -290,6 +315,7 @@ export class Controller {
       dev: { ...this.dev, output: this.dev.output.join(""), _handle: undefined },
       deps: this.deps,
       tsLs: this.tsLs,
+      lint: this.lint,
     };
   }
 
@@ -845,6 +871,120 @@ export class Controller {
     this.broadcast({ type: "ts:diagnostics", tsLs: this.tsLs });
   }
 
+  // ---- Linter (live diagnostics via JSON reporter) ------------------------
+
+  // Lazy entry point: ensure watchers are up and return a fresh lint snapshot.
+  // Called when the Problems tab opens or via the get_diagnostics action.
+  async getLintDiagnostics(): Promise<LintState> {
+    await this.refreshLint();
+    return this.lint;
+  }
+
+  private async refreshLint(): Promise<void> {
+    const d = this.detection;
+    if (!d?.hasProject || !d.availability?.lint) {
+      this.setLintState({
+        ...this.freshLint(),
+        status: "unavailable",
+        reason: "No linter (eslint / biome / oxlint) detected in this project.",
+      });
+      return;
+    }
+    // Share the TS pipeline's watchers + idle timer so saves re-lint live even in
+    // a lint-only (no TypeScript) project.
+    this.setupTsWatchers();
+    this.resetTsIdle();
+    // Coalesce overlapping runs: if a loop is already active, mark it dirty so it
+    // re-lints once more, and await that same loop so callers see the final result.
+    if (this._lintRunning) {
+      this._lintDirty = true;
+      return this._lintRunning;
+    }
+    const loop = this.runLintLoop();
+    this._lintRunning = loop;
+    // Only clear the handle if it's still ours — a project switch may have replaced
+    // it with a newer loop while this one was draining.
+    void loop.finally(() => {
+      if (this._lintRunning === loop) this._lintRunning = null;
+    });
+    return loop;
+  }
+
+  // Run the linter, re-running while changes land mid-run (_lintDirty). A
+  // generation token (bumped on project change / teardown) prevents a run that
+  // started before a switch from publishing stale results into the new project.
+  private async runLintLoop(): Promise<void> {
+    do {
+      this._lintDirty = false;
+      const gen = this._lintGen;
+      const d = this.detection;
+      const cwd = this.cwd;
+      if (!d?.hasProject || !d.availability?.lint) return;
+      const resolved = resolveLintJson(d);
+      if (resolved.unavailable) {
+        if (gen === this._lintGen) {
+          this.setLintState({
+            ...this.freshLint(),
+            status: "unavailable",
+            reason: resolved.reason,
+          });
+        }
+        return;
+      }
+      if (gen === this._lintGen) {
+        this.lint = { ...this.lint, status: "linting", reason: null };
+        this.broadcast({
+          type: "lint:status",
+          status: "linting",
+          errorCount: this.lint.errorCount,
+          warningCount: this.lint.warningCount,
+        });
+      }
+      const res = await run(resolved.argv, { cwd });
+      // A project switch (or teardown) happened mid-run — discard stale output.
+      if (gen !== this._lintGen) return;
+      const raw = (res.stdout ?? res.output ?? "").trim();
+      let diagnostics: Diagnostic[];
+      try {
+        diagnostics = sortDiagnostics(parseLint(resolved.parser, raw, cwd));
+      } catch {
+        // Non-JSON output usually means the linter itself errored (bad config,
+        // missing plugin) rather than reporting findings.
+        const reason =
+          (res.stderr || res.output || "").trim().split(/\r?\n/).slice(0, 3).join(" ") ||
+          "Linter produced no parseable output.";
+        this.setLintState({ ...this.freshLint(), status: "error", reason });
+        continue;
+      }
+      const errorCount = diagnostics.filter((x) => x.category === "error").length;
+      const warningCount = diagnostics.filter((x) => x.category === "warning").length;
+      this.setLintState({
+        status: "ready",
+        diagnostics,
+        errorCount,
+        warningCount,
+        infoCount: diagnostics.length - errorCount - warningCount,
+        lastUpdated: Date.now(),
+        reason: null,
+      });
+    } while (this._lintDirty);
+  }
+
+  private setLintState(next: LintState): void {
+    this.lint = next;
+    this.broadcast({ type: "lint:diagnostics", lint: this.lint });
+  }
+
+  private scheduleLintRefresh(): void {
+    const d = this.detection;
+    if (!d?.hasProject || !d.availability?.lint) return;
+    if (this._lintRefreshTimer) clearTimeout(this._lintRefreshTimer);
+    this._lintRefreshTimer = setTimeout(() => {
+      this._lintRefreshTimer = null;
+      void this.refreshLint();
+    }, 500);
+  }
+
   // ---- File watching → debounced refresh / restart ------------------------
 
   private setupTsWatchers(): void {
@@ -881,19 +1021,25 @@ export class Controller {
   }
 
   private onTsFsEvent(filename: string | Buffer | null): void {
+    const d = this.detection;
+    const a = d?.hasProject ? d.availability : undefined;
     if (filename == null) {
-      this.scheduleTsRefresh();
+      if (a?.diagnostics) this.scheduleTsRefresh();
+      if (a?.lint) this.scheduleLintRefresh();
       return;
     }
     const name = filename.toString();
     if (name.includes("node_modules") || name.includes(`.git${path.sep}`)) return;
     const base = path.basename(name);
     if (/^tsconfig.*\.json$/i.test(base)) {
-      this.scheduleTsRestart();
+      if (a?.diagnostics) this.scheduleTsRestart();
+      // tsconfig include/exclude/paths can change type-aware lint results too.
+      this.scheduleLintRefresh();
       return;
     }
     if (!TS_WATCH_EXT.has(path.extname(base))) return;
-    this.scheduleTsRefresh();
+    if (a?.diagnostics) this.scheduleTsRefresh();
+    this.scheduleLintRefresh();
   }
 
   private scheduleTsRefresh(): void {
@@ -939,18 +1085,30 @@ export class Controller {
 
   // Full teardown (project change / canvas close): drop the client and results.
   stopTsServer(): void {
-    for (const t of [this._tsRefreshTimer, this._tsRestartTimer, this._tsIdleTimer]) {
+    for (const t of [
+      this._tsRefreshTimer,
+      this._tsRestartTimer,
+      this._tsIdleTimer,
+      this._lintRefreshTimer,
+    ]) {
       if (t) clearTimeout(t);
     }
     this._tsRefreshTimer = null;
     this._tsRestartTimer = null;
     this._tsIdleTimer = null;
+    this._lintRefreshTimer = null;
+    this._lintDirty = false;
+    // Invalidate any in-flight lint run so it can't publish stale results into the
+    // next project, and release the handle so the next refresh starts fresh.
+    this._lintGen++;
+    this._lintRunning = null;
     this.teardownTsWatchers();
     if (this._tsClient) {
       this._tsClient.stop();
       this._tsClient = null;
     }
     this.tsLs = this.freshTsLs();
+    this.lint = this.freshLint();
   }
 
   // ---- Dependencies (delegated to deps.ts) --------------------------------
@@ -1023,16 +1181,22 @@ export class Controller {
     if (!diagnostic?.file) return { ok: false, reason: "No diagnostic to fix." };
     const prompt = buildDiagnosticFixPrompt({ cwd: this.cwd, diagnostics: [diagnostic] });
     await this.sendToChat(prompt);
-    this.log(`Sent ${diagnostic.code ? `TS${diagnostic.code}` : "diagnostic"} to Copilot.`);
+    const what =
+      diagnostic.source === "lint"
+        ? diagnostic.rule || "lint problem"
+        : diagnostic.code
+          ? `TS${diagnostic.code}`
+          : "diagnostic";
+    this.log(`Sent ${what} to Copilot.`);
     return { ok: true };
   }
 
   async fixAllDiagnostics(): Promise<{ ok: boolean; reason?: string }> {
-    const diagnostics = this.tsLs.diagnostics;
+    const diagnostics = [...this.tsLs.diagnostics, ...this.lint.diagnostics];
     if (!diagnostics.length) return { ok: false, reason: "No diagnostics to fix." };
     const prompt = buildDiagnosticFixPrompt({ cwd: this.cwd, diagnostics });
     await this.sendToChat(prompt);
-    this.log(`Sent ${diagnostics.length} diagnostic(s) to Copilot.`);
+    this.log(`Sent ${diagnostics.length} problem(s) to Copilot.`);
     return { ok: true };
   }
 }

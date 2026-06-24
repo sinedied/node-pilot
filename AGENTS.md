@@ -21,8 +21,9 @@ inspiration: [coffilot](https://github.com/jdubois/coffilot). Full design in
   - `types.ts` (shared domain types), `detect.ts` (pm/scripts/framework/TS/runners),
     `pm.ts`, `process-runner.ts` (cross-platform spawn), `lanes.ts`, `test-report.ts`,
     `deps.ts` (safe-update loop + rollback), `info.ts` (lazy Info-tab metrics:
-    transitive deps + sizes), `ts-server.ts` (SDK-free `tsserver` client powering
-    the live Problems panel), `controller.ts` (central state + SSE
+    transitive deps + sizes), `ts-server.ts` (SDK-free `tsserver` client) +
+    `lint-report.ts` (linter JSON → `Diagnostic[]`) — together powering the live
+    Problems panel, `controller.ts` (central state + SSE
     events), `server.ts` (http + SSE + `/api/*`), `actions.ts` (agent actions),
     `fix.ts` (prompt builders), `settings.ts` (per-project pinned tasks + theme).
 - `types/copilot-sdk.d.ts` — ambient shim for `@github/copilot-sdk/extension` so `tsc`
@@ -169,6 +170,28 @@ inspiration: [coffilot](https://github.com/jdubois/coffilot). Full design in
   - **Saved files only.** The canvas is not an editor — there are no dirty buffers, so
     diagnostics always reflect what's on disk. Documented limitation, acceptable for a
     side panel.
+- **Linter diagnostics (`lint-report.ts` → Problems tab, merged with TS)** — the Problems
+  panel shows **both** TypeScript and lint findings, grouped by file:
+  - **Separate from the Console lint lane.** `lanes.resolveLintJson()` resolves a
+    machine-readable JSON command (`biome lint --reporter=json .`, `eslint . --format json`,
+    or `oxlint --format=json`); `lint-report.ts` parses it into the shared `Diagnostic[]`
+    shape (`source:"lint"`, absolute paths, `rule` = lint rule id, `code:null`). The
+    human-readable lint *lane* that feeds the Console is unchanged.
+  - **Parse `res.stdout`, not `res.output`.** `process-runner.run()` now returns `stdout`
+    and `stderr` separately precisely so linter stderr notices don't corrupt JSON parsing.
+    Non-JSON stdout ⇒ lint `error` state (linter misconfig), not a crash.
+  - **Severity → category**: error→error, warn→warning, everything below (info/hint)→
+    `suggestion`. Suggestions render as low-priority rows and **don't drive the tab badge**
+    (badge = errors else warnings, summed across TS + lint).
+  - **Shares the TS fs watchers + idle timer.** `refreshLint()` calls `setupTsWatchers()` +
+    `resetTsIdle()`, and `onTsFsEvent` schedules a debounced re-lint, so lint-only projects
+    still get live updates. Overlapping runs are coalesced (`_lintRunning` + `_lintDirty`).
+  - **Availability is independent.** The Problems tab shows when `availability.diagnostics`
+    **or** `availability.lint` is true; each source degrades on its own. SSE events
+    `lint:status` / `lint:diagnostics` mirror `ts:status` / `ts:diagnostics`.
+  - **Fix prompts are source-aware.** `buildDiagnosticFixPrompt` tags each line `TS####` or
+    `lint(<rule>)` and says "TypeScript", "lint", or "TypeScript + lint"; `fixAllDiagnostics`
+    merges both lists.
 
 ## Workflow
 
@@ -190,7 +213,7 @@ The agent dev loop for any change:
    check it at **small panel widths** too (see the responsive rule in Conventions).
 4. **Rubber-duck review**: after a set of changes passes the checks and canvas
    verification — and before declaring the work done — run a `/rubber-duck` review of
-   the changes and address its findings.
+   the changes and address its findings. If Rubber Duck was run, make sure to mention it in the final message with a dedicated section including a brief summary of what it caught and fixed.
 5. CI (`.github/workflows/ci.yml`) runs the same checks on Node **22.18** (the
    supported floor) and **24**.
 

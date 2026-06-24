@@ -25,6 +25,8 @@ Instead of pills, extract proper information about the project. Suggest useful i
 - [ ] Problems tabs
   * include TS errors and lint errors, + fix me with copilot button
 
+- [ ] move theme toggle to settings tab as we now have a proper place for things like this
+
 - [ ] depdencies: 
   * link to changelog
   * scope: default (default or custom => check which ones)
@@ -35,20 +37,13 @@ Instead of pills, extract proper information about the project. Suggest useful i
 
 - [ ] Rayfin integration (rayfin tab)
 
-
 - [ ] no disctinction in pinned script, default pinned scripts can be unpinned too
   * improve: show which scripts it's aliased to
   * order same as package.json
 
 - [ ] skill readme/prep release
-
-
-
-
-
-
-- [ ] add skills (README for example)
-- [ ] logo
-- [ ] css
+  - [ ] add skills (README for example)
+  - [ ] logo
+  - [ ] css
 
 

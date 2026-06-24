@@ -223,23 +223,33 @@ export function buildActions(controller: Controller): ActionDefinition[] {
     {
       name: "get_diagnostics",
       description:
-        "Get live project-wide TypeScript diagnostics (errors + warnings with file, line, column, TS code and message) from the project's own language server. Reflects saved files on disk. Returns counts plus the list.",
+        "Get live project-wide problems — TypeScript diagnostics from the project's own language server plus linter findings (Biome / ESLint / oxlint) — with file, line, column, source ('ts'|'lint'), TS code or lint rule, severity and message. Reflects saved files on disk. Returns combined counts plus the merged list.",
       handler: async () => {
         const d = controller.detection;
         if (!d?.hasProject) return { hasProject: false, reason: d?.reason };
-        if (!d.availability?.diagnostics)
-          return { available: false, reason: "TypeScript not detected in this project." };
-        const ts = await controller.getDiagnostics();
+        const tsAvail = !!d.availability?.diagnostics;
+        const lintAvail = !!d.availability?.lint;
+        if (!tsAvail && !lintAvail)
+          return {
+            available: false,
+            reason: "Neither TypeScript nor a linter (Biome / ESLint / oxlint) detected.",
+          };
+        const ts = tsAvail ? await controller.getDiagnostics() : null;
+        const lint = lintAvail ? await controller.getLintDiagnostics() : null;
+        const merged = [...(ts?.diagnostics ?? []), ...(lint?.diagnostics ?? [])];
         return {
           available: true,
-          status: ts.status,
-          errorCount: ts.errorCount,
-          warningCount: ts.warningCount,
-          diagnostics: ts.diagnostics.slice(0, 200).map((x) => ({
+          status: { ts: ts?.status ?? null, lint: lint?.status ?? null },
+          errorCount: (ts?.errorCount ?? 0) + (lint?.errorCount ?? 0),
+          warningCount: (ts?.warningCount ?? 0) + (lint?.warningCount ?? 0),
+          infoCount: lint?.infoCount ?? 0,
+          diagnostics: merged.slice(0, 200).map((x) => ({
             file: x.file,
             line: x.start.line,
             column: x.start.offset,
+            source: x.source ?? "ts",
             code: x.code,
+            rule: x.rule ?? null,
             category: x.category,
             message: x.text,
           })),

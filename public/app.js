@@ -32,6 +32,15 @@ const state = {
     lastUpdated: null,
     reason: null,
   },
+  lint: {
+    status: "idle",
+    diagnostics: [],
+    errorCount: 0,
+    warningCount: 0,
+    infoCount: 0,
+    lastUpdated: null,
+    reason: null,
+  },
 };
 
 // Human-readable byte size (base-1000, matching npm/registry conventions).
@@ -573,7 +582,10 @@ function renderTabs() {
   const hasProject = !!state.detection?.hasProject;
   $("#tabbtn-tests").classList.toggle("hidden", hasProject && a.test === false);
   $("#tabbtn-preview").classList.toggle("hidden", hasProject && a.dev === false);
-  $("#tabbtn-problems").classList.toggle("hidden", hasProject && a.diagnostics === false);
+  $("#tabbtn-problems").classList.toggle(
+    "hidden",
+    hasProject && a.diagnostics === false && a.lint === false,
+  );
   const active = $(".tabs button.active");
   if (active?.classList.contains("hidden")) {
     const first =
@@ -983,32 +995,74 @@ function renderTests() {
 // also arrive via SSE (ts:status / ts:diagnostics), so this just primes them.
 function requestDiagnostics() {
   const a = state.detection?.availability || {};
-  if (!state.detection?.hasProject || a.diagnostics === false) {
+  const hasProject = !!state.detection?.hasProject;
+  if (!hasProject || (a.diagnostics === false && a.lint === false)) {
     renderProblems();
     return;
   }
-  api("/api/diagnostics", {}).then((ts) => {
-    if (ts && typeof ts === "object" && "status" in ts) {
-      state.tsLs = ts;
-      renderProblems();
-    }
-  });
+  if (a.diagnostics !== false) {
+    api("/api/diagnostics", {}).then((ts) => {
+      if (ts && typeof ts === "object" && "status" in ts) {
+        state.tsLs = ts;
+        renderProblems();
+      }
+    });
+  }
+  if (a.lint !== false) {
+    api("/api/lint", {}).then((lint) => {
+      if (lint && typeof lint === "object" && "status" in lint) {
+        state.lint = lint;
+        renderProblems();
+      }
+    });
+  }
 }
 
-const DIAG_ICON = { error: "x-circle-fill", warning: "alert" };
+const DIAG_ICON = { error: "x-circle-fill", warning: "alert", suggestion: "info" };
+const CAT_RANK = { error: 0, warning: 1, suggestion: 2, message: 3 };
 
-function setProblemsStatus(chip, ts) {
+// Tag shown in the per-row code column: TS#### for the language server, the lint
+// rule id for linter findings.
+function diagCodeLabel(d) {
+  if (d.source === "lint") return d.rule || "lint";
+  return d.code ? `TS${d.code}` : d.category;
+}
+
+// Combine the two diagnostic sources into one analyzing/error/idle status used by
+// the header chip and the empty state.
+function combinedProblemsStatus() {
+  const ts = state.tsLs;
+  const lint = state.lint;
+  const a = state.detection?.availability || {};
+  const tsAvail = a.diagnostics !== false;
+  const lintAvail = a.lint !== false;
+  const tsBusy = tsAvail && (ts.status === "starting" || ts.status === "analyzing");
+  const lintBusy = lintAvail && lint.status === "linting";
+  const tsErr = tsAvail && ts.status === "error";
+  const lintErr = lintAvail && lint.status === "error";
+  const errorCount = (tsAvail ? ts.errorCount || 0 : 0) + (lintAvail ? lint.errorCount || 0 : 0);
+  const warningCount =
+    (tsAvail ? ts.warningCount || 0 : 0) + (lintAvail ? lint.warningCount || 0 : 0);
+  const infoCount = lintAvail ? lint.infoCount || 0 : 0;
+  let status = "ready";
+  if (tsBusy || lintBusy) status = "analyzing";
+  else if (tsErr || lintErr) status = "error";
+  const reason = lintErr ? lint.reason : tsErr ? ts.reason : null;
+  return { status, errorCount, warningCount, infoCount, reason };
+}
+
+function setProblemsStatus(chip, s) {
   chip.className = "status-chip";
   chip.innerHTML = "";
-  if (ts.status === "starting" || ts.status === "analyzing") {
+  if (s.status === "analyzing") {
     chip.classList.add("running");
     chip.innerHTML = `<svg class="oi spin"><use href="#oct-sync" /></svg>`;
     chip.append(document.createTextNode("analyzing"));
-  } else if (ts.status === "error") {
+  } else if (s.status === "error") {
     chip.classList.add("failed");
     chip.innerHTML = `<svg class="oi"><use href="#oct-x-circle-fill" /></svg>`;
     chip.append(document.createTextNode("error"));
-  } else if (ts.status === "ready" && !ts.errorCount && !ts.warningCount) {
+  } else if (!s.errorCount && !s.warningCount && !s.infoCount) {
     chip.classList.add("passed");
     chip.innerHTML = `<svg class="oi"><use href="#oct-check-circle-fill" /></svg>`;
     chip.append(document.createTextNode("no problems"));
@@ -1025,9 +1079,10 @@ function renderProblems() {
 }
 
 function renderProblemsBody() {
-  const ts = state.tsLs;
   const a = state.detection?.availability || {};
   const hasProject = !!state.detection?.hasProject;
+  const tsAvail = a.diagnostics !== false;
+  const lintAvail = a.lint !== false;
   const chips = $("#problems-chips");
   const status = $("#problems-status");
   const fixBtn = $("#problems-fix");
@@ -1035,10 +1090,12 @@ function renderProblemsBody() {
   const empty = $("#problems-empty");
   const badge = $("#problems-badge");
 
-  const totalErr = ts.errorCount || 0;
-  const totalWarn = ts.warningCount || 0;
+  const s = combinedProblemsStatus();
+  const totalErr = s.errorCount;
+  const totalWarn = s.warningCount;
+  const totalInfo = s.infoCount;
 
-  // Tab badge: error count, else warning count.
+  // Tab badge: error count, else warning count (suggestions don't badge).
   if (totalErr) {
     badge.textContent = String(totalErr);
     badge.className = "tab-badge error";
@@ -1049,8 +1106,8 @@ function renderProblemsBody() {
     badge.className = "tab-badge hidden";
   }
 
-  // Unavailable: no project, or no TypeScript in the project.
-  if (!hasProject || a.diagnostics === false) {
+  // Unavailable: no project, or neither TypeScript nor a linter in the project.
+  if (!hasProject || (!tsAvail && !lintAvail)) {
     chips.innerHTML = "";
     groups.innerHTML = "";
     fixBtn.classList.add("hidden");
@@ -1061,12 +1118,12 @@ function renderProblemsBody() {
     if (!hasProject) {
       empty.innerHTML = `<svg class="oi"><use href="#oct-info" /></svg> No Node.js project detected.`;
     } else {
-      empty.innerHTML = `<svg class="oi"><use href="#oct-info" /></svg> No TypeScript detected — add <code>typescript</code> or a <code>tsconfig.json</code> to enable live diagnostics.`;
+      empty.innerHTML = `<svg class="oi"><use href="#oct-info" /></svg> No TypeScript or linter detected — add <code>typescript</code>/<code>tsconfig.json</code> or a linter (Biome, ESLint, oxlint) to enable live diagnostics.`;
     }
     return;
   }
 
-  setProblemsStatus(status, ts);
+  setProblemsStatus(status, s);
 
   chips.innerHTML = "";
   const mk = (cls, label) => {
@@ -1077,18 +1134,22 @@ function renderProblemsBody() {
   };
   if (totalErr) chips.append(mk("fail", `${totalErr} error${totalErr === 1 ? "" : "s"}`));
   if (totalWarn) chips.append(mk("skip", `${totalWarn} warning${totalWarn === 1 ? "" : "s"}`));
+  if (totalInfo) chips.append(mk("skip", `${totalInfo} info`));
 
-  const diags = ts.diagnostics || [];
+  const diags = [
+    ...(tsAvail ? state.tsLs.diagnostics || [] : []),
+    ...(lintAvail ? state.lint.diagnostics || [] : []),
+  ];
   fixBtn.classList.toggle("hidden", diags.length === 0);
 
   if (!diags.length) {
     groups.innerHTML = "";
     empty.classList.remove("hidden");
-    if (ts.status === "starting" || ts.status === "analyzing") {
+    if (s.status === "analyzing") {
       empty.innerHTML = `<svg class="oi spin"><use href="#oct-sync" /></svg> Analyzing project…`;
-    } else if (ts.status === "error") {
+    } else if (s.status === "error") {
       empty.innerHTML = `<svg class="oi"><use href="#oct-x-circle-fill" /></svg> `;
-      empty.append(document.createTextNode(ts.reason || "Diagnostics unavailable."));
+      empty.append(document.createTextNode(s.reason || "Diagnostics unavailable."));
     } else {
       empty.innerHTML = `<svg class="oi"><use href="#oct-check-circle-fill" /></svg> No problems found.`;
     }
@@ -1096,7 +1157,7 @@ function renderProblemsBody() {
   }
   empty.classList.add("hidden");
 
-  // Group diagnostics by file, errors-first ordering preserved from backend.
+  // Group diagnostics by file (TS + lint merged), errors-first within each file.
   const byFile = new Map();
   for (const d of diags) {
     if (!byFile.has(d.file)) byFile.set(d.file, []);
@@ -1105,14 +1166,22 @@ function renderProblemsBody() {
 
   groups.innerHTML = "";
   for (const [file, list] of byFile) {
+    list.sort(
+      (x, y) =>
+        (CAT_RANK[x.category] ?? 9) - (CAT_RANK[y.category] ?? 9) ||
+        x.start.line - y.start.line ||
+        x.start.offset - y.start.offset,
+    );
     const errs = list.filter((d) => d.category === "error").length;
-    const warns = list.length - errs;
+    const warns = list.filter((d) => d.category === "warning").length;
+    const infos = list.length - errs - warns;
     const det = document.createElement("details");
-    det.className = `suite ${errs ? "failed" : "skipped"}`;
+    det.className = `suite ${errs ? "failed" : warns ? "skipped" : "info"}`;
     det.open = true;
     const head = document.createElement("summary");
     head.className = "suite-head";
-    head.innerHTML = `<svg class="oi suite-status"><use href="#oct-${errs ? "x-circle-fill" : "alert"}" /></svg>`;
+    const headIcon = errs ? "x-circle-fill" : warns ? "alert" : "info";
+    head.innerHTML = `<svg class="oi suite-status"><use href="#oct-${headIcon}" /></svg>`;
     const name = document.createElement("span");
     name.className = "suite-name";
     name.textContent = relPath(file);
@@ -1121,6 +1190,7 @@ function renderProblemsBody() {
     const counts = [];
     if (errs) counts.push(`${errs} error${errs === 1 ? "" : "s"}`);
     if (warns) counts.push(`${warns} warning${warns === 1 ? "" : "s"}`);
+    if (infos) counts.push(`${infos} info`);
     const meta = document.createElement("span");
     meta.className = "suite-meta";
     meta.textContent = counts.join(" · ");
@@ -1138,7 +1208,7 @@ function renderProblemsBody() {
       loc.textContent = `${d.start.line}:${d.start.offset}`;
       const code = document.createElement("span");
       code.className = "diag-code";
-      code.textContent = d.code ? `TS${d.code}` : d.category;
+      code.textContent = diagCodeLabel(d);
       const msg = document.createElement("span");
       msg.className = "diag-msg";
       msg.textContent = d.text;
@@ -1423,6 +1493,19 @@ function applyEvent(e) {
       break;
     case "ts:diagnostics":
       state.tsLs = e.tsLs;
+      renderProblems();
+      break;
+    case "lint:status":
+      state.lint = {
+        ...state.lint,
+        status: e.status,
+        errorCount: e.errorCount ?? state.lint.errorCount,
+        warningCount: e.warningCount ?? state.lint.warningCount,
+      };
+      renderProblems();
+      break;
+    case "lint:diagnostics":
+      state.lint = e.lint;
       renderProblems();
       break;
     case "dev:start":

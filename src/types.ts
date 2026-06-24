@@ -91,6 +91,18 @@ export interface LaneUnavailable {
 
 export type LaneResult = LaneCommand | LaneUnavailable;
 
+export type LintParser = "biome" | "eslint" | "oxlint";
+
+export interface LintCommand {
+  label: string;
+  argv: string[];
+  parser: LintParser;
+  unavailable?: false;
+  reason?: undefined;
+}
+
+export type LintResolution = LintCommand | LaneUnavailable;
+
 export type LaneStatus = "idle" | "running" | "passed" | "failed";
 
 export interface LaneState {
@@ -233,6 +245,10 @@ export interface Diagnostic {
   code: number | null;
   category: DiagnosticCategory;
   text: string;
+  // Which analyzer produced this problem. Absent is treated as "ts" for back-compat.
+  source?: "ts" | "lint";
+  // Lint rule id (e.g. "lint/style/useTemplate" or "no-unused-vars"); null for TS.
+  rule?: string | null;
 }
 
 export type TsLsStatus = "stopped" | "starting" | "analyzing" | "ready" | "error";
@@ -242,6 +258,20 @@ export interface TsLsState {
   diagnostics: Diagnostic[];
   errorCount: number;
   warningCount: number;
+  lastUpdated: number | null;
+  reason: string | null;
+}
+
+// ---- Linter (live diagnostics, JSON reporter) -----------------------------
+
+export type LintStatus = "idle" | "linting" | "ready" | "error" | "unavailable";
+
+export interface LintState {
+  status: LintStatus;
+  diagnostics: Diagnostic[];
+  errorCount: number;
+  warningCount: number;
+  infoCount: number;
   lastUpdated: number | null;
   reason: string | null;
 }
@@ -259,6 +289,8 @@ export interface RunResult {
   code: number;
   signal: NodeJS.Signals | null;
   output: string;
+  stdout?: string;
+  stderr?: string;
   error?: string;
 }
 
