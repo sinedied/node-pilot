@@ -96,19 +96,23 @@ function toast(message) {
 
 // ---- Theme ----------------------------------------------------------------
 // The host doesn't expose its in-app theme, so we follow the OS appearance
-// (prefers-color-scheme) by default and let the user force light/dark. The
-// choice is persisted server-side and applied via a data-theme override.
-
-const THEME_NEXT = { auto: "light", light: "dark", dark: "auto" };
-const THEME_ICON = { auto: "device-desktop", light: "sun", dark: "moon" };
+// (prefers-color-scheme) by default and let the user force light/dark from the
+// Settings tab. The choice is persisted server-side and applied via a
+// data-theme override.
 
 function applyTheme(theme) {
   const root = document.documentElement;
   if (theme === "light" || theme === "dark") root.setAttribute("data-theme", theme);
   else root.removeAttribute("data-theme");
-  const btn = $("#theme-toggle");
-  btn.querySelector("use").setAttribute("href", `#oct-${THEME_ICON[theme] || "device-desktop"}`);
-  btn.title = `Theme: ${theme}`;
+  const seg = $("#theme-seg");
+  if (seg) {
+    const current = theme || "auto";
+    for (const b of seg.querySelectorAll("button")) {
+      const on = b.dataset.themeChoice === current;
+      b.classList.toggle("on", on);
+      b.setAttribute("aria-pressed", on ? "true" : "false");
+    }
+  }
 }
 
 // ---- Tabs -----------------------------------------------------------------
@@ -340,7 +344,9 @@ function setControlsEnabled(enabled) {
     b.disabled = !enabled;
   });
   $("#scripts-toggle").disabled = !enabled;
-  $$(".segmented button").forEach((b) => {
+  // The theme picker is a global UI preference — keep it usable even when there's
+  // no project (so only disable project-scoped segmented controls).
+  $$(".segmented:not(.theme-seg) button").forEach((b) => {
     b.disabled = !enabled;
   });
 }
@@ -599,16 +605,27 @@ function renderTabs() {
 
 // ---- Tasks (unified pinned lanes + scripts) -------------------------------
 
-// Built-in lane tasks, in toolbar order, with display labels. `dev` lives in
-// its own tab and is intentionally not a pinnable task.
+// Built-in lane tasks ("special" tasks), in canonical order, with display
+// labels. `dev` lives in its own tab and is intentionally not a pinnable task.
+// `typecheck` was removed as a promoted task — the Problems tab supersedes it.
 const LANE_TASKS = [
   { id: "build", label: "Build" },
-  { id: "typecheck", label: "Type-check" },
   { id: "lint", label: "Lint" },
   { id: "format", label: "Format" },
   { id: "test", label: "Test" },
 ];
 const LANE_LABEL = Object.fromEntries(LANE_TASKS.map((t) => [t.id, t.label]));
+
+// The package.json script names that "back" each special task (mirrors the
+// backend's pickScript precedence for what the lane actually runs). A lane binds
+// to the first present candidate; any other same-family script (e.g. `lint:fix`,
+// `format:check`, `test:watch`) stays an ordinary script.
+const LANE_CANDIDATES = {
+  build: ["build"],
+  lint: ["lint"],
+  format: ["format"],
+  test: ["test"],
+};
 
 function taskKey(t) {
   return t.type === "lane" ? `lane:${t.id}` : `script:${t.name}`;
@@ -661,51 +678,110 @@ function isPinned(t) {
   return (state.settings.pinnedTasks || []).some((p) => taskKey(p) === key);
 }
 
-function menuGroup(menu, title, tasks) {
-  if (!tasks.length) return;
-  const head = document.createElement("div");
-  head.className = "menu-head";
-  head.textContent = title;
-  menu.append(head);
-  for (const t of tasks) {
-    const item = document.createElement("div");
-    item.className = "menu-item";
-    const cb = document.createElement("input");
-    cb.type = "checkbox";
-    cb.checked = isPinned(t);
-    cb.title = "Pin to toolbar";
-    cb.addEventListener("change", () => togglePin(t, cb.checked));
-    const label = document.createElement("span");
-    label.className = "menu-name";
-    label.textContent = taskLabel(t);
-    label.title = "Run now";
-    label.addEventListener("click", () => {
-      runTask(t);
-      closeScriptsMenu();
-    });
-    item.append(cb, label);
-    menu.append(item);
+// Build the unified, package.json-ordered task list for the dropdown. Each entry
+// is { task, special, scriptName, taskLabel }. A script that backs a built-in
+// special task (build/lint/format/test) represents the *lane* (so there's no
+// duplicate lane/script row); built-in tasks with no backing script are listed
+// as script-less specials at the top.
+function classifyTasks() {
+  const a = state.detection?.availability || {};
+  const scriptNames = state.detection?.scriptNames || [];
+  // Bind each available special lane to its first present candidate script.
+  const binding = new Map(); // laneId -> scriptName | null
+  for (const t of LANE_TASKS) {
+    if (a[t.id] === false) continue;
+    const cand = (LANE_CANDIDATES[t.id] || []).find((c) => scriptNames.includes(c)) || null;
+    binding.set(t.id, cand);
   }
+  // Reverse map (bound script -> laneId) so we can promote it during the scan.
+  const scriptToLane = new Map();
+  for (const [id, script] of binding) if (script) scriptToLane.set(script, id);
+
+  const entries = [];
+  // 1) Script-less specials first, in LANE_TASKS order.
+  for (const t of LANE_TASKS) {
+    if (binding.get(t.id) === null) {
+      entries.push({ task: { type: "lane", id: t.id }, special: true, taskLabel: t.label });
+    }
+  }
+  // 2) All package.json scripts in declared order; promote the ones that back a lane.
+  for (const name of scriptNames) {
+    const laneId = scriptToLane.get(name);
+    if (laneId) {
+      entries.push({
+        task: { type: "lane", id: laneId },
+        special: true,
+        taskLabel: LANE_LABEL[laneId] || laneId,
+        scriptName: name,
+      });
+    } else {
+      entries.push({ task: { type: "script", name }, special: false, scriptName: name });
+    }
+  }
+  return entries;
+}
+
+// Render one dropdown row: a pin checkbox plus a run label. Special tasks get a
+// ★ marker; script-backed specials also show a muted task-label chip.
+function renderTaskItem(e) {
+  const item = document.createElement("div");
+  item.className = e.special ? "menu-item special" : "menu-item";
+  const cb = document.createElement("input");
+  cb.type = "checkbox";
+  cb.checked = isPinned(e.task);
+  cb.title = "Pin to toolbar";
+  cb.addEventListener("change", () => togglePin(e.task, cb.checked));
+  const label = document.createElement("span");
+  label.className = "menu-name";
+  label.title = "Run now";
+  if (e.special) {
+    const mark = document.createElement("span");
+    mark.className = "task-mark";
+    mark.textContent = "★";
+    label.append(mark);
+  }
+  // Script-backed specials and ordinary scripts show the script name; script-less
+  // specials show the task label.
+  label.append(document.createTextNode(e.scriptName || e.taskLabel));
+  if (e.special && e.scriptName) {
+    const chip = document.createElement("span");
+    chip.className = "task-chip";
+    chip.textContent = e.taskLabel;
+    label.append(chip);
+  }
+  label.addEventListener("click", () => {
+    runTask(e.task);
+    closeScriptsMenu();
+  });
+  item.append(cb, label);
+  return item;
 }
 
 function renderScriptsMenu() {
   const menu = $("#scripts-menu");
   menu.innerHTML = "";
-  const a = state.detection?.availability || {};
-  const laneTasks = LANE_TASKS.filter((t) => a[t.id] !== false).map((t) => ({
-    type: "lane",
-    id: t.id,
-  }));
-  const scriptTasks = (state.detection?.scriptNames || []).map((name) => ({
-    type: "script",
-    name,
-  }));
-  if (!laneTasks.length && !scriptTasks.length) {
+  const entries = classifyTasks();
+  if (!entries.length) {
     menu.innerHTML = '<div class="menu-empty">No tasks available.</div>';
     return;
   }
-  menuGroup(menu, "Tasks", laneTasks);
-  menuGroup(menu, "Scripts", scriptTasks);
+  let anySpecial = false;
+  for (const e of entries) {
+    if (e.special) anySpecial = true;
+    menu.append(renderTaskItem(e));
+  }
+  if (anySpecial) {
+    const note = document.createElement("div");
+    note.className = "menu-foot";
+    const mark = document.createElement("span");
+    mark.className = "task-mark";
+    mark.textContent = "★";
+    note.append(
+      mark,
+      document.createTextNode(" Built-in task — output is parsed into its tab (Tests, Problems…)."),
+    );
+    menu.append(note);
+  }
 }
 
 async function togglePin(task, pin) {
@@ -1575,12 +1651,14 @@ function connect() {
 
 $("#refresh").addEventListener("click", () => api("/api/refresh", {}));
 
-$("#theme-toggle").addEventListener("click", () => {
-  const next = THEME_NEXT[state.settings.theme] || "auto";
-  state.settings.theme = next;
-  applyTheme(next);
-  api("/api/settings", { theme: next });
-});
+for (const b of $$("#theme-seg button")) {
+  b.addEventListener("click", () => {
+    const next = b.dataset.themeChoice;
+    state.settings.theme = next;
+    applyTheme(next);
+    api("/api/settings", { theme: next });
+  });
+}
 
 $("#scripts-toggle").addEventListener("click", (e) => {
   e.stopPropagation();
@@ -1985,6 +2063,7 @@ $("#settings-toggle").addEventListener("click", () => {
 // Rebuild the Tabs list (drag handle + icon/label + visibility switch) and sync
 // the On-load auto-run checkboxes from current settings.
 function renderSettingsPanel() {
+  applyTheme(state.settings.theme);
   const al = $("#set-autolint");
   if (al) al.checked = !!state.settings.autoLint;
   const at = $("#set-autotest");

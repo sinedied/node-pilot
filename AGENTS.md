@@ -73,7 +73,9 @@ inspiration: [coffilot](https://github.com/jdubois/coffilot). Full design in
   - `dist/` stays gitignored: nothing is emitted; `tsc` runs `--noEmit` as a checker.
 - **No theme/icon inheritance**: the host injects no theme CSS vars/classes and the
   canvas API has no icon field. Theme follows OS `prefers-color-scheme` + a manual
-  Auto/Light/Dark toggle; tab icon is a best-effort favicon (`public/icon.svg`).
+  Auto/Light/Dark control that lives in the **Settings tab** (Appearance section, a
+  `.segmented` control wired in `app.js`); tab icon is a best-effort favicon
+  (`public/icon.svg`).
 - **Don't fight the native cursor**: the UI is a webview hosted by the native Copilot
   app, which owns the mouse cursor. With per-element cursors (e.g. `cursor: pointer` on
   buttons) the cursor flickers between default and pointer on hover — the webview and
@@ -147,6 +149,19 @@ inspiration: [coffilot](https://github.com/jdubois/coffilot). Full design in
 - **Lane availability**: each `resolve*()` in `lanes.ts` reports `{unavailable}`;
   `laneAvailability(d)` aggregates it onto `detection.availability` so the UI hides
   lanes/tabs that don't apply.
+- **Tasks dropdown model** (`#scripts-menu`, `classifyTasks()`/`renderScriptsMenu()` in
+  `app.js`): one list in **package.json declared order** — no separate Tasks/Scripts
+  groups. The "special" built-in tasks are **build / lint / format / test** (`LANE_TASKS`);
+  each binds to its first present candidate script (`LANE_CANDIDATES`, mirroring
+  `lanes.ts` `laneScript()`/`pickScript`). A script that backs a special is shown
+  **bold + ★ + a muted task-label chip** and runs/pins as the **lane** (no duplicate
+  lane/script row); built-in specials with no backing script (e.g. Lint/Format via Biome)
+  are listed as script-less specials **at the top**. Other same-family scripts
+  (`lint:fix`, `format:check`, `test:watch`) stay ordinary. `defaultPinnedTasks()`
+  (`lanes.ts`) follows the same order. **Type-check is no longer a promoted task** — the
+  Problems tab (TS language server) supersedes it, so a `typecheck`/`tsc` script just runs
+  as an ordinary script. `LANE_TASK_ORDER` dropped `typecheck`; `resolveTypecheck`/
+  `availability.typecheck` are kept only for the agent action + `/api/lane` back-compat.
 - **TS language server (`ts-server.ts` → Problems tab)** — a few hard-won rules:
   - **Never spawn `process.execPath`** to run `tsserver.js`. Inside the extension
     fork, `execPath` is the **host Copilot CLI binary** (e.g. `.../copilot`), which

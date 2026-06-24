@@ -71,4 +71,44 @@ describe("defaultPinnedTasks", () => {
     // order follows the toolbar order (build before test).
     expect(ids.indexOf("build")).toBeLessThan(ids.indexOf("test"));
   });
+
+  it("lists script-less specials first, then script-backed in package.json order", () => {
+    const detection = {
+      hasProject: true,
+      pm: "npm",
+      framework: { id: null },
+      linter: "biome",
+      formatter: "biome",
+      testRunner: null,
+      // Declared order puts `test` before `build`.
+      scripts: { test: "vitest run", build: "tsc" },
+      scriptNames: ["test", "build"],
+      deps: {},
+      devDeps: {},
+      typescript: true,
+    } as unknown as ProjectDetection;
+    const ids = defaultPinnedTasks(detection).map((t) => (t.type === "lane" ? t.id : t.name));
+    // Lint + Format are available via Biome but have no backing script, so they
+    // come first (in lane order); then the script-backed specials follow their
+    // package.json index (test before build).
+    expect(ids).toEqual(["lint", "format", "test", "build"]);
+  });
+
+  it("drops type-check as a promoted task", () => {
+    const detection = {
+      hasProject: true,
+      pm: "npm",
+      framework: { id: null },
+      linter: null,
+      formatter: null,
+      testRunner: null,
+      scripts: { typecheck: "tsc --noEmit", build: "tsc" },
+      scriptNames: ["typecheck", "build"],
+      deps: {},
+      devDeps: {},
+      typescript: true,
+    } as unknown as ProjectDetection;
+    const ids = defaultPinnedTasks(detection).map((t) => (t.type === "lane" ? t.id : t.name));
+    expect(ids).not.toContain("typecheck");
+  });
 });

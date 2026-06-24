@@ -294,15 +294,48 @@ export function laneAvailability(d: ProjectDetection | null): LaneAvailability {
   };
 }
 
-// The built-in lane tasks, in toolbar order. `dev` is intentionally excluded —
-// it lives in its own tab (persistent start/stop/URL/preview state).
-export const LANE_TASK_ORDER = ["build", "typecheck", "lint", "format", "test"] as const;
+// The built-in "special" lane tasks, in canonical order. `dev` is excluded — it
+// lives in its own tab (persistent start/stop/URL/preview state). `typecheck` is
+// excluded too: the Problems tab (TS language server) supersedes it, so it is no
+// longer surfaced as a promoted task (a `typecheck` script just runs raw).
+export const LANE_TASK_ORDER = ["build", "lint", "format", "test"] as const;
+type SpecialLane = (typeof LANE_TASK_ORDER)[number];
 
-// Default pinned tasks when a project has no saved config yet: every built-in
-// lane that can actually run, in order. These behave like any other pinned task
-// (unpinnable) once a project has its own config.
+// The package.json script names that "back" each special task. A lane binds to
+// the first matching script present (mirrors pickScript precedence). Any other
+// same-family script (e.g. `lint:fix`, `format:check`, `test:watch`) stays an
+// ordinary script.
+const LANE_SCRIPT_CANDIDATES: Record<SpecialLane, string[]> = {
+  build: ["build"],
+  lint: ["lint"],
+  format: ["format"],
+  test: ["test"],
+};
+
+// The package.json script that backs a special lane, honoring candidate
+// precedence, or null when the lane runs without a backing script (e.g. Lint via
+// Biome, Format via Biome, Test via a runner with no `test` script).
+export function laneScript(d: ProjectDetection | null, lane: SpecialLane): string | null {
+  if (!d) return null;
+  return pickScript(d, LANE_SCRIPT_CANDIDATES[lane] ?? []);
+}
+
+// Default pinned tasks when a project has no saved config yet: every available
+// built-in special lane, ordered to match the unified Tasks dropdown — script-less
+// specials first (in LANE_TASK_ORDER), then script-backed specials by their
+// package.json script index. These behave like any other pinned task once a
+// project has its own config.
 export function defaultPinnedTasks(d: Detection | null): PinnedTask[] {
   const pd: ProjectDetection | null = d?.hasProject ? d : null;
   const av = laneAvailability(pd);
-  return LANE_TASK_ORDER.filter((id) => av[id]).map((id) => ({ type: "lane", id }));
+  const available = LANE_TASK_ORDER.filter((id) => av[id]);
+  const scriptIndex = (id: SpecialLane): number => {
+    const s = laneScript(pd, id);
+    return s && pd ? pd.scriptNames.indexOf(s) : -1;
+  };
+  const scriptless = available.filter((id) => scriptIndex(id) < 0);
+  const backed = available
+    .filter((id) => scriptIndex(id) >= 0)
+    .sort((a, b) => scriptIndex(a) - scriptIndex(b));
+  return [...scriptless, ...backed].map((id) => ({ type: "lane", id }));
 }

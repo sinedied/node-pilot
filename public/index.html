@@ -267,9 +267,6 @@
           >
             <svg class="oi" aria-hidden="true"><use href="#oct-sync" /></svg>
           </button>
-          <button type="button" id="theme-toggle" class="icon-btn" title="Theme: auto" aria-label="Toggle theme">
-            <svg class="oi" aria-hidden="true"><use href="#oct-device-desktop" /></svg>
-          </button>
         </div>
         <div id="info-inactive" class="info-inactive hidden"></div>
         <div id="info-body">
@@ -459,6 +456,25 @@
       <!-- Settings -->
       <section id="tab-settings" class="tab-panel" hidden>
         <div class="settings-body">
+          <div class="settings-section">
+            <h3 class="settings-title">Appearance</h3>
+            <p class="settings-hint">Cockpit follows your OS theme by default. Override it here.</p>
+            <!-- biome-ignore lint/a11y/useSemanticElements: styled segmented button group, not a fieldset -->
+            <div id="theme-seg" class="segmented theme-seg" role="group" aria-label="Theme">
+              <button type="button" data-theme-choice="auto" aria-pressed="false">
+                <svg class="oi" aria-hidden="true"><use href="#oct-device-desktop" /></svg>
+                <span>Auto</span>
+              </button>
+              <button type="button" data-theme-choice="light" aria-pressed="false">
+                <svg class="oi" aria-hidden="true"><use href="#oct-sun" /></svg>
+                <span>Light</span>
+              </button>
+              <button type="button" data-theme-choice="dark" aria-pressed="false">
+                <svg class="oi" aria-hidden="true"><use href="#oct-moon" /></svg>
+                <span>Dark</span>
+              </button>
+            </div>
+          </div>
           <div class="settings-section">
             <h3 class="settings-title">Tabs</h3>
             <p class="settings-hint">Drag to reorder. Toggle to show or hide a tab.</p>
