@@ -1137,11 +1137,6 @@ export class Controller {
   runAudit() {
     return deps.runAudit(this);
   }
-  // Single "Refresh" for the deps tab: outdated + audit together.
-  async refreshDeps() {
-    await Promise.all([this.listOutdated(), this.runAudit()]);
-    return this.deps;
-  }
   safeUpdate(opts?: SafeUpdateOptions): Promise<SafeUpdateResult> {
     return deps.safeUpdate(this, opts);
   }
@@ -1149,30 +1144,23 @@ export class Controller {
     return deps.rollbackLast(this);
   }
 
-  // "Update with Copilot": resolve targets from the chosen scope and hand the
-  // update off to the agent (which drives update_dependencies / audit / rollback).
-  // default -> every outdated package to its in-range `wanted` version;
-  // custom  -> the named packages to their `latest` version.
+  // "Update with Copilot": resolve targets from the user's per-package selection
+  // and hand the update off to the agent (which drives update_dependencies /
+  // audit / rollback). The selected packages target their in-range `wanted`
+  // version in "default" mode, or `latest` in "latest" mode.
   async sendCopilotUpdate(opts: {
-    mode: "default" | "custom";
+    mode: "default" | "latest";
     packages?: string[] | null;
   }): Promise<{ ok: boolean; reason?: string }> {
-    const mode = opts.mode === "custom" ? "custom" : "default";
+    const mode = opts.mode === "latest" ? "latest" : "default";
     if (!this.deps.outdated) await this.listOutdated().catch(() => {});
     const list = this.deps.outdated?.list || [];
+    const picked = new Set(opts.packages || []);
     const targets: UpdatePromptTarget[] = [];
-    if (mode === "default") {
-      for (const o of list) {
-        const to = o.wanted || o.latest;
-        if (to && to !== o.current) targets.push({ name: o.name, from: o.current, to });
-      }
-    } else {
-      const wanted = new Set(opts.packages || []);
-      for (const o of list) {
-        if (!wanted.has(o.name)) continue;
-        const to = o.latest || o.wanted;
-        if (to) targets.push({ name: o.name, from: o.current, to });
-      }
+    for (const o of list) {
+      if (!picked.has(o.name)) continue;
+      const to = mode === "latest" ? o.latest || o.wanted : o.wanted || o.latest;
+      if (to && to !== o.current) targets.push({ name: o.name, from: o.current, to });
     }
     if (!targets.length) return { ok: false, reason: "No packages to update." };
     // Establish a real audit baseline so the agent can tell genuinely new

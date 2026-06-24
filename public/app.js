@@ -353,6 +353,11 @@ function setControlsEnabled(enabled) {
     b.disabled = !enabled;
   });
   $("#scripts-toggle").disabled = !enabled;
+  // Project-scoped icon buttons (the deps refresh buttons) follow the project.
+  for (const id of ["#deps-updates-refresh", "#deps-audit-refresh"]) {
+    const b = $(id);
+    if (b) b.disabled = !enabled;
+  }
   // The theme picker is a global UI preference — keep it usable even when there's
   // no project (so only disable project-scoped segmented controls).
   $$(".segmented:not(.theme-seg) button").forEach((b) => {
@@ -417,7 +422,13 @@ function renderRunning() {
 // When clearing the busy state, re-derive actionability (don't blindly enable).
 function setDepsBusy(active, on) {
   setBtnLoading(active, on);
-  for (const b of [$("#deps-refresh"), $("#deps-update"), $("#deps-audit-fix")]) {
+  const all = [
+    $("#deps-updates-refresh"),
+    $("#deps-audit-refresh"),
+    $("#deps-update"),
+    $("#deps-audit-fix"),
+  ];
+  for (const b of all) {
     if (b && b !== active) b.disabled = on;
   }
   if (!on) updateDepsButtons();
@@ -1414,18 +1425,14 @@ function navigatePreview(raw) {
 
 // ---- Dependencies ---------------------------------------------------------
 
-// One "Changelog" / "Repo" link cell for an outdated/vulnerable package row.
+// One link per package row: changelog if known, else repo, else npm.
 function depLinksCell(links) {
   if (!links) return "—";
-  const out = [];
   if (links.changelog)
-    out.push(
-      `<a href="${esc(links.changelog)}" target="_blank" rel="noopener">${links.isGithub ? "Changelog" : "Repo"}</a>`,
-    );
-  else if (links.repo)
-    out.push(`<a href="${esc(links.repo)}" target="_blank" rel="noopener">Repo</a>`);
-  out.push(`<a href="${esc(links.npm)}" target="_blank" rel="noopener">npm</a>`);
-  return out.join('<span class="dep-link-sep">·</span>');
+    return `<a href="${esc(links.changelog)}" target="_blank" rel="noopener">${links.isGithub ? "Changelog" : "Repo"}</a>`;
+  if (links.repo) return `<a href="${esc(links.repo)}" target="_blank" rel="noopener">Repo</a>`;
+  if (links.npm) return `<a href="${esc(links.npm)}" target="_blank" rel="noopener">npm</a>`;
+  return "—";
 }
 
 // Short prod/dev badge from the npm "type" field (devDependencies -> dev).
@@ -1449,24 +1456,23 @@ function renderOutdated() {
     updateDepsButtons();
     return;
   }
-  const custom = depsScope === "custom";
-  // A row is pickable only when a newer "latest" exists. Prune any stale picks
-  // (packages that left the list or are no longer updatable) so the Custom-mode
-  // button state and the POST payload stay accurate across refreshes.
-  const checkable = new Set(
-    od.list.filter((o) => o.latest && o.latest !== o.current).map((o) => o.name),
-  );
+  // A row is updatable when the target for the current mode differs from the
+  // installed version: Default targets the in-range `wanted`, Latest targets
+  // `latest`. Pre-select every updatable row (user can deselect individually).
+  const latest = depsScope === "latest";
+  const isUpdatable = (o) =>
+    latest ? !!o.latest && o.latest !== o.current : !!o.wanted && o.wanted !== o.current;
+  const checkable = new Set(od.list.filter(isUpdatable).map((o) => o.name));
   for (const name of [...depsChecked]) if (!checkable.has(name)) depsChecked.delete(name);
+  for (const name of checkable) depsChecked.add(name);
   const rows = od.list
     .map((o) => {
-      const pickable = custom && checkable.has(o.name);
-      const checkbox = custom
-        ? `<td class="dep-pick">${
-            pickable
-              ? `<input type="checkbox" class="dep-check" data-name="${esc(o.name)}"${depsChecked.has(o.name) ? " checked" : ""} aria-label="Update ${esc(o.name)}" />`
-              : ""
-          }</td>`
-        : "";
+      const pickable = checkable.has(o.name);
+      const checkbox = `<td class="dep-pick">${
+        pickable
+          ? `<input type="checkbox" class="dep-check" data-name="${esc(o.name)}"${depsChecked.has(o.name) ? " checked" : ""} aria-label="Update ${esc(o.name)}" />`
+          : ""
+      }</td>`;
       return `<tr>
         ${checkbox}
         <td class="dep-name">${esc(o.name)} ${depTypeBadge(o.type)}</td>
@@ -1478,33 +1484,49 @@ function renderOutdated() {
       </tr>`;
     })
     .join("");
+  const allOn = checkable.size > 0;
+  const selectAll = `<input type="checkbox" id="deps-select-all" class="dep-check"${allOn ? " checked" : ""}${checkable.size ? "" : " disabled"} aria-label="Select all updates" />`;
   wrap.innerHTML = `<table class="dep-table">
-    <thead><tr>${custom ? "<th></th>" : ""}<th>Package</th><th>Current</th><th>Wanted</th><th>Latest</th><th>Bump</th><th>Links</th></tr></thead>
+    <thead><tr><th class="dep-pick">${selectAll}</th><th>Package</th><th>Current</th><th>Wanted</th><th>Latest</th><th>Bump</th><th>Link</th></tr></thead>
     <tbody>${rows}</tbody></table>
     ${od.supported ? "" : '<div class="empty">JSON output unavailable for this package manager — values are best-effort.</div>'}`;
-  for (const cb of $$("#outdated .dep-check")) {
+  for (const cb of $$("#outdated .dep-check[data-name]")) {
     cb.addEventListener("change", (e) => {
       const name = e.currentTarget.dataset.name;
       if (e.currentTarget.checked) depsChecked.add(name);
       else depsChecked.delete(name);
+      syncSelectAll(checkable);
       updateDepsButtons();
     });
   }
+  const selAll = $("#deps-select-all");
+  if (selAll)
+    selAll.addEventListener("change", (e) => {
+      const on = e.currentTarget.checked;
+      for (const name of checkable) {
+        if (on) depsChecked.add(name);
+        else depsChecked.delete(name);
+      }
+      for (const cb of $$("#outdated .dep-check[data-name]")) cb.checked = on;
+      updateDepsButtons();
+    });
   updateDepsButtons();
+}
+
+// Keep the header "select all" box in sync with the row checkboxes.
+function syncSelectAll(checkable) {
+  const selAll = $("#deps-select-all");
+  if (!selAll) return;
+  let checked = 0;
+  for (const name of checkable) if (depsChecked.has(name)) checked++;
+  selAll.checked = checkable.size > 0 && checked === checkable.size;
+  selAll.indeterminate = checked > 0 && checked < checkable.size;
 }
 
 // Enable/disable the two Copilot action buttons based on what's actionable.
 function updateDepsButtons() {
-  const od = state.deps.outdated;
-  const list = od?.list || [];
   const upd = $("#deps-update");
-  if (upd) {
-    const inRange = list.some(
-      (o) => (o.wanted || o.latest) && (o.wanted || o.latest) !== o.current,
-    );
-    const canUpdate = depsScope === "custom" ? depsChecked.size > 0 : inRange;
-    upd.disabled = !canUpdate;
-  }
+  if (upd) upd.disabled = depsChecked.size === 0;
   const fix = $("#deps-audit-fix");
   if (fix) {
     const vulns = state.deps.audit?.vulnerabilities || [];
@@ -2151,11 +2173,20 @@ $("#capture-send").addEventListener("click", async (e) => {
   }
 });
 
-$("#deps-refresh").addEventListener("click", async (e) => {
+$("#deps-updates-refresh").addEventListener("click", async (e) => {
   const btn = e.currentTarget;
   setDepsBusy(btn, true);
   try {
-    await api("/api/deps/refresh", {});
+    await api("/api/deps/outdated", {});
+  } finally {
+    setDepsBusy(btn, false);
+  }
+});
+$("#deps-audit-refresh").addEventListener("click", async (e) => {
+  const btn = e.currentTarget;
+  setDepsBusy(btn, true);
+  try {
+    await api("/api/deps/audit", {});
   } finally {
     setDepsBusy(btn, false);
   }
@@ -2165,7 +2196,7 @@ $$("#deps-scope button").forEach((b) => {
     $$("#deps-scope button").forEach((x) => {
       x.classList.toggle("on", x === b);
     });
-    depsScope = b.dataset.scope === "custom" ? "custom" : "default";
+    depsScope = b.dataset.scope === "latest" ? "latest" : "default";
     renderOutdated();
   });
 });
@@ -2176,7 +2207,7 @@ $("#deps-update").addEventListener("click", async (e) => {
   try {
     const r = await api("/api/deps/update", {
       mode: depsScope,
-      packages: depsScope === "custom" ? [...depsChecked] : null,
+      packages: [...depsChecked],
     });
     if (r?.ok) toast("Asked Copilot to update dependencies. Watch the chat.");
     else if (r?.reason) toast(r.reason);

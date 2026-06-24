@@ -1423,9 +1423,7 @@ main {
 
 /* ---- Dependencies ---- */
 .outdated {
-  flex: 1;
   min-height: 0;
-  overflow: auto;
 }
 
 table.dep-table {
@@ -1482,7 +1480,10 @@ table.dep-table {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
-  padding: 6px 0;
+  align-items: center;
+}
+.audit.hidden {
+  display: none;
 }
 
 .sev {
@@ -1511,24 +1512,24 @@ table.dep-table {
 }
 
 /* ---- Dependencies: Updates + Security sections ---- */
+/* Scroll the whole tab as one column; don't set `display` here or it would
+   override `.tab-panel { display: none }` and leak the panel onto other tabs. */
+#tab-deps {
+  overflow-y: auto;
+}
 #tab-deps .deps-section {
   display: flex;
   flex-direction: column;
   min-height: 0;
   gap: 6px;
 }
-#tab-deps .deps-section.updates {
-  flex: 1 1 0;
-}
 #tab-deps .deps-section.security {
-  flex: 0 1 auto;
-  max-height: 45%;
+  margin-top: 12px;
+  padding-top: 12px;
 }
 #tab-deps .outdated,
 #tab-deps .audit-detail {
-  flex: 1;
   min-height: 0;
-  overflow: auto;
 }
 
 .deps-section-head {

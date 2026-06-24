@@ -112,7 +112,7 @@ export interface UpdatePromptTarget {
 }
 
 export interface DepsUpdatePromptInput {
-  mode: "default" | "custom";
+  mode: "default" | "latest";
   targets: UpdatePromptTarget[];
   baselineAudit?: Record<string, number> | null;
   // Packages with a pre-existing high/critical advisory, so the agent treats
@@ -138,8 +138,8 @@ export function buildDepsUpdatePrompt({
   const severe = baselineSevere?.length ? baselineSevere.join(", ") : "none";
   const scopeNote =
     mode === "default"
-      ? "These are every outdated package at the version allowed by package.json (in-range)."
-      : "These are the packages I hand-picked, targeting their latest versions (may cross the semver range).";
+      ? "These are the packages I picked, targeting the version allowed by package.json (in-range)."
+      : "These are the packages I picked, targeting their latest versions (may cross the semver range).";
   return [
     "Please update my dependencies using Cockpit.js's tools, and keep the app working.",
     "",

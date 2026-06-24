@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { Controller } from "../src/controller.ts";
-import { normalizeRepoUrl, buildDepLinks, parseAudit } from "../src/deps.ts";
+import { normalizeRepoUrl, buildDepLinks, parseAudit, readDevSet } from "../src/deps.ts";
 import { buildDepsUpdatePrompt, buildDepsAuditFixPrompt } from "../src/fix.ts";
 
 const dir = await mkdtemp(path.join(os.tmpdir(), "np-deps-"));
@@ -61,6 +61,25 @@ describe.skipIf(!online)("dependency safe-update loop", () => {
     expect(r2.kept?.some((t) => t.name === "is-odd")).toBe(true);
     const after = JSON.parse(await readFile(manifest, "utf8"));
     expect(after.dependencies["is-odd"]).toMatch(/3\.0\.1/);
+  });
+});
+
+describe("readDevSet", () => {
+  it("returns the devDependencies keys, empty for prod-only or missing", async () => {
+    const d = await mkdtemp(path.join(os.tmpdir(), "np-dev-"));
+    await writeFile(
+      path.join(d, "package.json"),
+      JSON.stringify({
+        dependencies: { "is-odd": "3.0.0" },
+        devDependencies: { vitest: "1.0.0", biome: "1.0.0" },
+      }),
+    );
+    const set = await readDevSet(d);
+    expect(set.has("vitest")).toBe(true);
+    expect(set.has("biome")).toBe(true);
+    expect(set.has("is-odd")).toBe(false);
+    expect(await readDevSet(path.join(d, "nope"))).toEqual(new Set());
+    await rm(d, { recursive: true, force: true });
   });
 });
 
@@ -156,7 +175,7 @@ describe("parseAudit", () => {
 describe("deps Copilot prompts", () => {
   it("update prompt lists targets, the audit baseline, and severe identities", () => {
     const p = buildDepsUpdatePrompt({
-      mode: "custom",
+      mode: "latest",
       targets: [{ name: "left-pad", from: "1.0.0", to: "1.3.0" }],
       baselineAudit: { high: 2, critical: 1 },
       baselineSevere: ["lodash", "minimist"],

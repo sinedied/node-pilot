@@ -80,7 +80,7 @@ function parseNpmOutdated(text: string): OutdatedEntry[] {
       current,
       wanted,
       latest,
-      type: info.type || (info.dependent ? "dependencies" : "dependencies"),
+      type: "dependencies",
       bump: classifyBump(current || wanted, latest),
     });
   }
@@ -170,6 +170,18 @@ export async function buildDepLinks(cwd: string, name: string): Promise<DepLinks
   return { npm, repo, changelog: isGithub ? `${repo}/releases` : repo, isGithub };
 }
 
+// Read the project's devDependencies so outdated entries can be tagged
+// dev/prod (npm/pnpm `outdated --json` does not include a dependency type).
+export async function readDevSet(cwd: string): Promise<Set<string>> {
+  try {
+    const raw = await readText(path.join(cwd, "package.json"));
+    const json = JSON.parse(raw || "{}");
+    return new Set<string>(Object.keys(json.devDependencies || {}));
+  } catch {
+    return new Set<string>();
+  }
+}
+
 export async function listOutdated(controller: Controller): Promise<OutdatedResult> {
   const d = controller.detection;
   if (!d?.hasProject) return { list: [], supported: false };
@@ -187,8 +199,10 @@ export async function listOutdated(controller: Controller): Promise<OutdatedResu
     supported = list.length > 0;
   }
   list.sort((a, b) => a.name.localeCompare(b.name));
+  const devSet = await readDevSet(controller.cwd);
   await Promise.all(
     list.map(async (e) => {
+      e.type = devSet.has(e.name) ? "devDependencies" : "dependencies";
       e.links = await buildDepLinks(controller.cwd, e.name);
     }),
   );

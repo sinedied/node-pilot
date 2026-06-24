@@ -216,21 +216,26 @@ inspiration: [coffilot](https://github.com/jdubois/coffilot). Full design in
   - **Fix prompts are source-aware.** `buildDiagnosticFixPrompt` tags each line `TS####` or
     `lint(<rule>)` and says "TypeScript", "lint", or "TypeScript + lint"; `fixAllDiagnostics`
     merges both lists.
-- **Dependencies tab = two sections + agentic actions** (`deps.ts`, `fix.ts`, `#tab-deps`):
-  - **One Refresh button** (`/api/deps/refresh` → `refreshDeps()` = `listOutdated()` + `runAudit()`).
-    The tab pill (`#deps-badge`, `renderDepsBadge()`) shows outdated + vuln counts (red on
-    high/critical) and populates on load via `autoDeps` (carried in the boot snapshot).
-  - **Updates section**: outdated table with per-package links (Changelog/Repo/npm) built
-    offline from `node_modules/<pkg>/package.json` (`buildDepLinks()` / `normalizeRepoUrl()`;
-    GitHub → `/releases`). Scope is **Default** (every outdated → in-range `wanted`) vs
-    **Custom** (tick rows → `latest`). **Update with Copilot** (`/api/deps/update {mode,packages}`
-    → `sendCopilotUpdate()`) resolves targets and sends a chat prompt (`buildDepsUpdatePrompt`);
-    the agent drives `update_dependencies` (verify **build + lint + test**, auto-rollback) then
-    `audit`, reverting anything that introduces a **new high/critical** advisory.
-  - **Security section**: per-package vulnerability table (severity, range, fix target/major,
-    advisory links from npm `via[].url`, parsed by exported `parseAudit()`). **Fix with Copilot**
-    (`/api/deps/audit-fix` → `sendCopilotAuditFix()` → `buildDepsAuditFixPrompt`) prompts the agent
-    to bump fixable packages and report the unfixable ones.
+- **Dependencies tab = two sections, each self-refreshing + agentic actions** (`deps.ts`, `fix.ts`, `#tab-deps`):
+  - **Per-section refresh**: each section header has its own icon refresh button —
+    `#deps-updates-refresh` → `/api/deps/outdated` (`listOutdated()`), `#deps-audit-refresh` →
+    `/api/deps/audit` (`runAudit()`). The tab pill (`#deps-badge`, `renderDepsBadge()`) shows
+    outdated + vuln counts (red on high/critical) and populates on load via `autoDeps` (which calls
+    `listOutdated`/`runAudit` directly, carried in the boot snapshot).
+  - **Updates section**: outdated table with **one** changelog-priority link per row
+    (Changelog → Repo → npm fallback), built offline from `node_modules/<pkg>/package.json`
+    (`buildDepLinks()` / `normalizeRepoUrl()`; GitHub → `/releases`). dev/prod badge is classified
+    from the project `package.json` via `readDevSet()` (npm `outdated --json` has **no** type field).
+    Checkboxes show in **both** modes with a header select-all (all updatable pre-selected); Target is
+    **Default** (selected → in-range `wanted`) vs **Latest** (selected → `latest`). **Update with Copilot**
+    (`/api/deps/update {mode,packages}` → `sendCopilotUpdate()`) resolves targets from the picked
+    packages and sends a chat prompt (`buildDepsUpdatePrompt`); the agent drives `update_dependencies`
+    (verify **build + lint + test**, auto-rollback) then `audit`, reverting anything that introduces a
+    **new high/critical** advisory.
+  - **Security section**: severity pills live in the section header; per-package vulnerability table
+    (severity, range, fix target/major, advisory links from npm `via[].url`, parsed by exported
+    `parseAudit()`). **Fix with Copilot** (`/api/deps/audit-fix` → `sendCopilotAuditFix()` →
+    `buildDepsAuditFixPrompt`) prompts the agent to bump fixable packages and report the unfixable ones.
   - `defaultVerify()` is **build + lint + test** (no typecheck — the Problems tab covers types).
     The in-process `safeUpdate()` loop stays as the engine the `update_dependencies` action calls;
     the buttons no longer run it directly — they hand off to the agent.

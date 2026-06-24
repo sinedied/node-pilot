@@ -169,8 +169,10 @@ async function handleApi(
       const result = await controller.sendScreenshotToChat(body.prompt, data, mimeType);
       return sendJson(res, result.ok ? 200 : 502, result);
     }
-    case "POST /api/deps/refresh":
-      return sendJson(res, 200, await controller.refreshDeps());
+    case "POST /api/deps/outdated":
+      return sendJson(res, 200, await controller.listOutdated());
+    case "POST /api/deps/audit":
+      return sendJson(res, 200, await controller.runAudit());
     case "POST /api/deps/update":
       return sendJson(res, 200, await controller.sendCopilotUpdate(body));
     case "POST /api/deps/audit-fix":

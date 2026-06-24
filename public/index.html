@@ -434,12 +434,6 @@
 
       <!-- Dependencies -->
       <section id="tab-deps" class="tab-panel" hidden>
-        <div class="panel-head">
-          <button type="button" id="deps-refresh" class="lane-btn">
-            <svg class="oi" aria-hidden="true"><use href="#oct-sync" /></svg>Refresh
-          </button>
-        </div>
-
         <!-- Updates -->
         <div class="deps-section updates">
           <div class="deps-section-head wrap">
@@ -447,14 +441,22 @@
               <svg class="oi" aria-hidden="true"><use href="#oct-package" /></svg>Updates
             </h3>
             <span class="grow"></span>
-            <span class="field-label">Scope</span>
+            <span class="field-label">Target</span>
             <!-- biome-ignore lint/a11y/useSemanticElements: styled segmented button group, not a fieldset -->
-            <div class="segmented" id="deps-scope" role="group" aria-label="Update scope">
+            <div class="segmented" id="deps-scope" role="group" aria-label="Update target">
               <button type="button" data-scope="default" class="on">Default</button>
-              <button type="button" data-scope="custom">Custom</button>
+              <button type="button" data-scope="latest">Latest</button>
             </div>
             <button type="button" id="deps-update" class="lane-btn primary">
               <svg class="oi" aria-hidden="true"><use href="#oct-copilot" /></svg>Update with Copilot
+            </button>
+            <button type="button"
+              id="deps-updates-refresh"
+              class="icon-btn"
+              title="Check for outdated packages"
+              aria-label="Refresh updates"
+            >
+              <svg class="oi" aria-hidden="true"><use href="#oct-sync" /></svg>
             </button>
           </div>
           <div id="outdated" class="outdated"></div>
@@ -466,12 +468,20 @@
             <h3 class="deps-section-title">
               <svg class="oi" aria-hidden="true"><use href="#oct-shield-check" /></svg>Security
             </h3>
+            <div id="audit-summary" class="audit hidden"></div>
             <span class="grow"></span>
             <button type="button" id="deps-audit-fix" class="lane-btn primary">
               <svg class="oi" aria-hidden="true"><use href="#oct-copilot" /></svg>Fix with Copilot
             </button>
+            <button type="button"
+              id="deps-audit-refresh"
+              class="icon-btn"
+              title="Run a security audit"
+              aria-label="Refresh security audit"
+            >
+              <svg class="oi" aria-hidden="true"><use href="#oct-sync" /></svg>
+            </button>
           </div>
-          <div id="audit-summary" class="audit hidden"></div>
           <div id="audit-detail" class="audit-detail"></div>
         </div>
 
