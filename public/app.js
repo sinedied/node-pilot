@@ -23,6 +23,15 @@ const state = {
   test: { report: null, watch: false },
   dev: { status: "stopped", url: null, output: "" },
   deps: { outdated: null, audit: null, update: null },
+  debug: {
+    status: "stopped",
+    target: null,
+    paused: null,
+    breakpoints: [],
+    reason: null,
+    output: "",
+    console: "",
+  },
   settings: {
     theme: "auto",
     pinnedTasks: [],
@@ -130,13 +139,14 @@ const tabBtns = () => $$("#tabs button[data-tab]");
 
 // Default tab order + per-tab metadata (icon + label), shared by the Settings
 // panel and applyTabLayout(). The Dev tab is now "preview".
-const DEFAULT_TAB_ORDER = ["info", "preview", "tests", "problems", "deps", "console"];
+const DEFAULT_TAB_ORDER = ["info", "preview", "tests", "problems", "deps", "debugger", "console"];
 const TAB_META = {
   info: { label: "Info", icon: "oct-info" },
   preview: { label: "Preview", icon: "oct-eye" },
   tests: { label: "Tests", icon: "oct-beaker" },
   problems: { label: "Problems", icon: "oct-alert" },
   deps: { label: "Dependencies", icon: "oct-package" },
+  debugger: { label: "Debugger", icon: "oct-bug" },
   console: { label: "Console", icon: "oct-terminal" },
 };
 
@@ -184,6 +194,7 @@ function showTab(name) {
   for (const b of tabBtns()) b.classList.toggle("active", b.dataset.tab === name);
   for (const p of $$(".tab-panel")) p.classList.toggle("active", p.id === `tab-${name}`);
   if (name === "problems") requestDiagnostics();
+  if (name === "debugger" && state.debug.status === "paused" && !dbgVars) refreshDebugVariables();
   recomputeTabOverflow();
 }
 
@@ -1627,6 +1638,213 @@ function renderDepsBadge() {
   recomputeTabOverflow();
 }
 
+// ---- Debugger -------------------------------------------------------------
+
+// The variables tree fetches lazily: pick a frame -> /api/debug/variables,
+// then expand objects on demand via /api/debug/properties. Caches are cleared
+// whenever a new pause/frame is selected so stale object ids aren't reused.
+let dbgSelectedFrame = null;
+let dbgVars = null; // { frameId, scopes } for the selected frame
+const dbgExpanded = new Set(); // objectIds currently expanded
+const dbgChildren = new Map(); // objectId -> properties[] (lazy)
+
+function appendDebugConsole(text) {
+  const c = $("#dbg-console");
+  if (!c) return;
+  c.textContent += strip(text);
+  c.scrollTop = c.scrollHeight;
+}
+
+function renderDebugger() {
+  const d = state.debug;
+  const status = d.status || "stopped";
+  const active = status !== "stopped";
+  const paused = status === "paused";
+
+  $("#dbg-start")?.classList.toggle("hidden", active);
+  $("#dbg-attach")?.classList.toggle("hidden", active);
+  $("#dbg-stop")?.classList.toggle("hidden", !active);
+  const program = $("#dbg-program");
+  if (program) program.disabled = active;
+
+  const chip = $("#dbg-status");
+  if (chip) {
+    if (status === "starting") {
+      chip.className = "status-chip running";
+      chip.innerHTML = `<svg class="oi spin"><use href="#oct-sync" /></svg>`;
+      chip.append(document.createTextNode("starting"));
+    } else {
+      statusChip(chip, status);
+    }
+  }
+
+  const toolbar = $("#dbg-toolbar");
+  if (toolbar) toolbar.hidden = !active;
+  const setDisabled = (sel, off) => {
+    const el = $(sel);
+    if (el) el.disabled = off;
+  };
+  setDisabled("#dbg-continue", !paused);
+  setDisabled("#dbg-step-over", !paused);
+  setDisabled("#dbg-step-into", !paused);
+  setDisabled("#dbg-step-out", !paused);
+  setDisabled("#dbg-pause", status !== "running");
+
+  const reason = $("#dbg-pause-reason");
+  if (reason) {
+    if (paused && d.paused) {
+      const r = d.paused.reason || "paused";
+      reason.textContent = d.paused.text ? `${r}: ${d.paused.text}` : r;
+    } else {
+      reason.textContent = active ? "running" : "";
+    }
+  }
+
+  renderDebugStack();
+  renderDebugVariables();
+  renderDebugBreakpoints();
+  renderDebuggerBadge();
+}
+
+function renderDebugStack() {
+  const host = $("#dbg-stack");
+  if (!host) return;
+  const d = state.debug;
+  if (d.status !== "paused" || !d.paused || !d.paused.frames.length) {
+    host.innerHTML = `<div class="dbg-empty">${d.status === "running" ? "Running…" : "Not paused."}</div>`;
+    return;
+  }
+  const frames = d.paused.frames;
+  if (!frames.some((f) => f.id === dbgSelectedFrame)) dbgSelectedFrame = d.paused.topFrameId;
+  host.innerHTML = frames
+    .map((f) => {
+      const loc = f.file ? `${esc(relPath(f.file))}:${f.line}` : "&lt;native&gt;";
+      const sel = f.id === dbgSelectedFrame ? " selected" : "";
+      return `<button type="button" class="dbg-frame${sel}" data-frame="${esc(f.id)}">
+        <span class="dbg-frame-fn">${esc(f.functionName || "(anonymous)")}</span>
+        <span class="dbg-frame-loc">${loc}</span>
+      </button>`;
+    })
+    .join("");
+}
+
+function renderDebugVariables() {
+  const host = $("#dbg-vars");
+  if (!host) return;
+  const d = state.debug;
+  if (d.status !== "paused") {
+    host.innerHTML = `<div class="dbg-empty">Variables appear when paused.</div>`;
+    return;
+  }
+  if (!dbgVars || !dbgVars.scopes) {
+    host.innerHTML = `<div class="dbg-empty">Loading…</div>`;
+    return;
+  }
+  host.innerHTML = dbgVars.scopes
+    .map((scope) => {
+      const title = scope.name ? `${scope.type}: ${scope.name}` : scope.type;
+      const rows = (scope.variables || []).map((v) => dbgVarRow(v, 0)).join("");
+      return `<div class="dbg-scope"><div class="dbg-scope-head">${esc(title)}</div>${
+        rows || `<div class="dbg-empty">—</div>`
+      }</div>`;
+    })
+    .join("");
+}
+
+function dbgVarRow(v, depth) {
+  const pad = depth * 12 + 8;
+  const expandable = v.expandable && v.objectId;
+  const open = expandable && dbgExpanded.has(v.objectId);
+  const caret = expandable
+    ? `<span class="dbg-caret${open ? " open" : ""}">▸</span>`
+    : `<span class="dbg-caret-spacer"></span>`;
+  let html = `<div class="dbg-var${expandable ? " expandable" : ""}" style="padding-left:${pad}px"${
+    expandable ? ` data-objid="${esc(v.objectId)}"` : ""
+  }>${caret}<span class="dbg-var-name">${esc(v.name)}</span><span class="dbg-var-sep">:</span><span class="dbg-var-val dbg-t-${esc(v.type)}">${esc(v.value)}</span></div>`;
+  if (open) {
+    const kids = dbgChildren.get(v.objectId);
+    if (kids) html += kids.map((c) => dbgVarRow(c, depth + 1)).join("");
+    else
+      html += `<div class="dbg-var" style="padding-left:${pad + 20}px"><span class="dbg-empty">Loading…</span></div>`;
+  }
+  return html;
+}
+
+function renderDebugBreakpoints() {
+  const host = $("#dbg-breakpoints");
+  if (!host) return;
+  const bps = state.debug.breakpoints || [];
+  if (!bps.length) {
+    host.innerHTML = `<div class="dbg-empty">No breakpoints yet. The agent can add them via debug_set_breakpoint.</div>`;
+    return;
+  }
+  host.innerHTML = bps
+    .map((b) => {
+      const dot = b.verified ? "verified" : "pending";
+      const cond = b.condition
+        ? `<span class="dbg-bp-cond" title="${esc(b.condition)}">if ${esc(b.condition)}</span>`
+        : "";
+      return `<div class="dbg-bp">
+        <span class="dbg-bp-dot ${dot}" title="${b.verified ? "Verified" : "Unverified"}"></span>
+        <span class="dbg-bp-loc">${esc(relPath(b.file))}:${b.line}</span>
+        ${cond}
+        <button type="button" class="dbg-bp-remove icon-btn" data-bp="${esc(b.id)}" title="Remove breakpoint" aria-label="Remove breakpoint">
+          <svg class="oi" aria-hidden="true"><use href="#oct-x" /></svg>
+        </button>
+      </div>`;
+    })
+    .join("");
+}
+
+function renderDebuggerBadge() {
+  const badge = $("#debugger-badge");
+  if (!badge) return;
+  const d = state.debug;
+  const n = (d.breakpoints || []).length;
+  if (d.status === "paused") {
+    badge.textContent = n ? String(n) : "•";
+    badge.className = "tab-badge warning";
+  } else if (n) {
+    badge.textContent = String(n);
+    badge.className = "tab-badge";
+  } else {
+    badge.className = "tab-badge hidden";
+  }
+  recomputeTabOverflow();
+}
+
+// Fetch the variables for the currently selected frame and re-render the tree.
+async function refreshDebugVariables() {
+  const d = state.debug;
+  if (d.status !== "paused") {
+    dbgVars = null;
+    renderDebugVariables();
+    return;
+  }
+  dbgChildren.clear();
+  dbgExpanded.clear();
+  const res = await api("/api/debug/variables", {
+    frameId: dbgSelectedFrame || undefined,
+  });
+  dbgVars = res?.ok ? { frameId: res.frameId, scopes: res.scopes || [] } : { scopes: [] };
+  renderDebugVariables();
+}
+
+async function toggleDebugVar(objectId) {
+  if (dbgExpanded.has(objectId)) {
+    dbgExpanded.delete(objectId);
+    renderDebugVariables();
+    return;
+  }
+  dbgExpanded.add(objectId);
+  if (!dbgChildren.has(objectId)) {
+    renderDebugVariables();
+    const res = await api("/api/debug/properties", { objectId });
+    dbgChildren.set(objectId, res?.ok ? res.properties || [] : []);
+  }
+  renderDebugVariables();
+}
+
 // ---- SSE ------------------------------------------------------------------
 
 async function refreshSettings() {
@@ -1670,6 +1888,7 @@ function applyEvent(e) {
       renderOutdated();
       renderAudit();
       renderDepsBadge();
+      renderDebugger();
       renderRunning();
       if (activeConsoleLane) {
         setConsoleLane(activeConsoleLane);
@@ -1784,6 +2003,47 @@ function applyEvent(e) {
       state.deps.audit = e.audit;
       renderAudit();
       renderDepsBadge();
+      break;
+    case "debug:state":
+      state.debug = {
+        ...state.debug,
+        status: e.status,
+        target: e.target ?? null,
+        paused: e.paused ?? null,
+        breakpoints: e.breakpoints || [],
+        reason: e.reason ?? null,
+      };
+      renderDebugger();
+      break;
+    case "debug:paused":
+      state.debug.status = "paused";
+      state.debug.paused = e.paused;
+      dbgSelectedFrame = e.paused?.topFrameId ?? null;
+      renderDebugger();
+      if ($("#tab-debugger")?.classList.contains("active")) refreshDebugVariables();
+      break;
+    case "debug:resumed":
+      if (state.debug.status !== "stopped") state.debug.status = "running";
+      state.debug.paused = null;
+      dbgSelectedFrame = null;
+      renderDebugger();
+      break;
+    case "debug:data":
+      state.debug.output = (state.debug.output || "") + e.chunk;
+      appendDebugConsole(strip(e.chunk));
+      break;
+    case "debug:console":
+      state.debug.console = (state.debug.console || "") + (e.text || "");
+      appendDebugConsole(e.text || "");
+      break;
+    case "debug:exit":
+      state.debug.status = "stopped";
+      state.debug.paused = null;
+      dbgSelectedFrame = null;
+      if (e.exitCode != null && e.exitCode !== 0) {
+        appendDebugConsole(`\n[process exited with code ${e.exitCode}]\n`);
+      }
+      renderDebugger();
       break;
   }
 }
@@ -1905,6 +2165,80 @@ $("#dev-url").addEventListener("keydown", (e) => {
 $("#dev-url").addEventListener("blur", (e) => {
   const v = e.currentTarget.value.trim();
   if (v && v !== devPreviewUrl) navigatePreview(v);
+});
+
+// ---- Debugger wiring ------------------------------------------------------
+$("#dbg-start").addEventListener("click", async () => {
+  const program = $("#dbg-program").value.trim();
+  if (!program) {
+    toast("Enter a program to debug.");
+    return;
+  }
+  const res = await api("/api/debug/start", { program });
+  if (res && res.ok === false && res.reason) toast(res.reason);
+});
+$("#dbg-attach").addEventListener("click", async () => {
+  const res = await api("/api/debug/attach", {});
+  if (res && res.ok === false && res.reason) toast(res.reason);
+});
+$("#dbg-stop").addEventListener("click", () => api("/api/debug/stop", {}));
+$("#dbg-continue").addEventListener("click", () => api("/api/debug/continue", {}));
+$("#dbg-pause").addEventListener("click", () => api("/api/debug/pause", {}));
+$("#dbg-step-over").addEventListener("click", () => api("/api/debug/step-over", {}));
+$("#dbg-step-into").addEventListener("click", () => api("/api/debug/step-into", {}));
+$("#dbg-step-out").addEventListener("click", () => api("/api/debug/step-out", {}));
+
+// Pick a call frame -> reload its variables.
+$("#dbg-stack").addEventListener("click", (e) => {
+  const btn = e.target.closest(".dbg-frame");
+  if (!btn) return;
+  dbgSelectedFrame = btn.dataset.frame;
+  renderDebugStack();
+  refreshDebugVariables();
+});
+
+// Expand/collapse objects in the variables tree.
+$("#dbg-vars").addEventListener("click", (e) => {
+  const row = e.target.closest(".dbg-var.expandable");
+  if (!row || !row.dataset.objid) return;
+  toggleDebugVar(row.dataset.objid);
+});
+
+// Remove a breakpoint.
+$("#dbg-breakpoints").addEventListener("click", (e) => {
+  const btn = e.target.closest(".dbg-bp-remove");
+  if (!btn) return;
+  api("/api/debug/breakpoint/remove", { id: btn.dataset.bp });
+});
+
+async function runDebugEval() {
+  const input = $("#dbg-eval-input");
+  const expression = input.value.trim();
+  if (!expression) return;
+  appendDebugConsole(`> ${expression}\n`);
+  input.value = "";
+  const res = await api("/api/debug/evaluate", {
+    expression,
+    frameId: dbgSelectedFrame || undefined,
+  });
+  if (res?.ok) {
+    appendDebugConsole(`${res.result?.value ?? "undefined"}\n`);
+  } else {
+    appendDebugConsole(`⚠ ${res?.error || res?.reason || "Evaluation failed."}\n`);
+  }
+}
+$("#dbg-eval-run").addEventListener("click", runDebugEval);
+$("#dbg-eval-input").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    runDebugEval();
+  }
+});
+$("#dbg-program").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    $("#dbg-start").click();
+  }
 });
 
 // ---- Logs toggle + draggable splitter -------------------------------------

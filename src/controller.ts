@@ -29,6 +29,12 @@ import {
   type UpdatePromptTarget,
 } from "./fix.ts";
 import { TsServerClient, resolveTsserverPath } from "./ts-server.ts";
+import {
+  DebugSession,
+  type DebugActionResult,
+  type DebugAttachOptions,
+  type DebugStartOptions,
+} from "./debug.ts";
 import { loadSettings, saveSettings, KNOWN_TABS } from "./settings.ts";
 import { computeStats } from "./info.ts";
 import * as deps from "./deps.ts";
@@ -123,6 +129,7 @@ export class Controller {
   test: { report: TestReport | null; watch: boolean };
   dev: DevState;
   deps: DepsState;
+  debug: DebugSession;
   fixContext: Record<string, FixContextEntry>;
   projectStats: ProjectStats | null;
   _statsPromise: Promise<ProjectStats> | null;
@@ -156,6 +163,12 @@ export class Controller {
     this.test = { report: null, watch: false };
     this.dev = { status: "stopped", url: null, port: null, output: [], pid: null, _handle: null };
     this.deps = { outdated: null, audit: null, update: null };
+    // Agent-facing debugger (CDP over Node's inspector). Events flow through
+    // this controller's broadcast()/log() like every other subsystem.
+    this.debug = new DebugSession({
+      broadcast: (evt) => this.broadcast(evt),
+      log: (message, level) => this.log(message, level),
+    });
     this.fixContext = {}; // lane -> last failure { command, output, exitCode, report }
     this.projectStats = null;
     this._statsPromise = null;
@@ -328,6 +341,7 @@ export class Controller {
       test: this.test,
       dev: { ...this.dev, output: this.dev.output.join(""), _handle: undefined },
       deps: this.deps,
+      debug: this.debug.serialize(),
       tsLs: this.tsLs,
       lint: this.lint,
     };
@@ -801,6 +815,86 @@ export class Controller {
     this.dev._handle = null;
     this.broadcast({ type: "dev:exit", exitCode: null });
     return { ok: true };
+  }
+
+  // ---- Debugger (CDP) -----------------------------------------------------
+  // Thin delegators so the HTTP API and the agent actions drive the same
+  // session. The session resolves relative paths against the project cwd.
+
+  debugStart(opts: Omit<DebugStartOptions, "cwd"> & { cwd?: string }): Promise<DebugActionResult> {
+    return this.debug.start({ ...opts, cwd: opts.cwd || this.cwd });
+  }
+
+  debugAttach(opts: DebugAttachOptions): Promise<DebugActionResult> {
+    return this.debug.attach(opts);
+  }
+
+  debugStop(): Promise<DebugActionResult> {
+    return this.debug.stop();
+  }
+
+  debugSetBreakpoint(input: {
+    file: string;
+    line: number;
+    column?: number;
+    condition?: string;
+  }): Promise<DebugActionResult> {
+    return this.debug.setBreakpoint({ ...input, cwd: this.cwd });
+  }
+
+  debugRemoveBreakpoint(input: {
+    id?: string;
+    file?: string;
+    line?: number;
+  }): Promise<DebugActionResult> {
+    return this.debug.removeBreakpoint({ ...input, cwd: this.cwd });
+  }
+
+  debugListBreakpoints(): DebugActionResult {
+    return this.debug.listBreakpoints();
+  }
+
+  debugContinue(): Promise<DebugActionResult> {
+    return this.debug.resume();
+  }
+  debugPause(): Promise<DebugActionResult> {
+    return this.debug.pause();
+  }
+  debugStepOver(): Promise<DebugActionResult> {
+    return this.debug.stepOver();
+  }
+  debugStepInto(): Promise<DebugActionResult> {
+    return this.debug.stepInto();
+  }
+  debugStepOut(): Promise<DebugActionResult> {
+    return this.debug.stepOut();
+  }
+
+  debugWaitForPause(timeoutMs?: number): Promise<DebugActionResult> {
+    return this.debug.waitForPause(timeoutMs);
+  }
+
+  debugGetStack(): DebugActionResult {
+    return this.debug.getStack();
+  }
+
+  debugGetVariables(input: {
+    frameId?: string;
+    includeGlobal?: boolean;
+  }): Promise<DebugActionResult> {
+    return this.debug.getVariables(input);
+  }
+
+  debugGetProperties(objectId: string): Promise<DebugActionResult> {
+    return this.debug.getProperties(objectId);
+  }
+
+  debugEvaluate(input: { expression: string; frameId?: string }): Promise<DebugActionResult> {
+    return this.debug.evaluate(input);
+  }
+
+  debugGetState(): DebugActionResult {
+    return this.debug.getStatus();
   }
 
   // ---- TypeScript language server (live diagnostics) ----------------------

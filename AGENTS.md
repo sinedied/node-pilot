@@ -25,11 +25,13 @@ inspiration: [coffilot](https://github.com/jdubois/coffilot). Full design in
     `lint-report.ts` (linter JSON → `Diagnostic[]`) — together powering the live
     Problems panel, `controller.ts` (central state + SSE
     events), `server.ts` (http + SSE + `/api/*`), `actions.ts` (agent actions),
-    `fix.ts` (prompt builders), `settings.ts` (per-project pinned tasks + theme).
+    `fix.ts` (prompt builders), `settings.ts` (per-project pinned tasks + theme),
+    `cdp.ts` (zero-dep Chrome DevTools Protocol client) + `debug.ts` (`DebugSession`:
+    the agent-facing Node.js debugger — launch/attach, breakpoints, stepping, inspect).
 - `types/copilot-sdk.d.ts` — ambient shim for `@github/copilot-sdk/extension` so `tsc`
   resolves it in CI (the real package only exists inside the Copilot app).
 - `public/` — vanilla HTML/CSS/JS UI (Info / Preview / Tests / Problems / Dependencies /
-  Console tabs — that's the **default order**; users reorder/hide tabs and toggle
+  Debugger / Console tabs — that's the **default order**; users reorder/hide tabs and toggle
   auto-run via a gear-launched **Settings** panel, `#tab-settings`, which is not itself
   a tab in `#tabs`),
   GitHub Primer light/dark theming + inline Octicon sprite (MIT, bundled, no network).
@@ -243,6 +245,25 @@ inspiration: [coffilot](https://github.com/jdubois/coffilot). Full design in
   - `defaultVerify()` is **build + lint + test** (no typecheck — the Problems tab covers types).
     The in-process `safeUpdate()` loop stays as the engine the `update_dependencies` action calls;
     the buttons no longer run it directly — they hand off to the agent.
+
+- **Debugger tab = agent-facing Node.js debugger over CDP** (`cdp.ts`, `debug.ts`, `#tab-debugger`):
+  - **Zero deps**: speaks the Chrome DevTools Protocol over Node 24's global `WebSocket` + `fetch`
+    (`CdpClient` = JSON-RPC + `/json/list`). No `ws`, no `chrome-remote-interface`.
+  - **The priority is the agent surface**: 16 `debug_*` actions in `actions.ts` (start/attach/stop,
+    set/remove/list breakpoints, continue/pause/step over·into·out, `debug_wait_for_pause` — the
+    blocking primitive for agentic step loops — get_stack/get_variables/get_properties/evaluate/get_state).
+    Each returns structured JSON; the UI (`renderDebugger*` in `app.js`, `/api/debug/*` in `server.ts`,
+    `debug:*` SSE events) is just a second consumer of the same `DebugSession`.
+  - **Launch** = `node --inspect-brk=127.0.0.1:0 <program>` (parse the `Debugger listening on ws://…`
+    line from stderr — no port race); **attach** = `fetchTargets(host, port)`. Never inject `--inspect-brk`
+    into `npm run …` (npm grabs the port) — launch `node` directly or **attach** to a `--inspect` process.
+  - **Node quirks baked in**: `CallFrame.url` is empty, so files are resolved from a `scriptId→url` map
+    built from `Debugger.scriptParsed`. CDP lines are 0-based (converted to 1-based). On macOS `/tmp` is a
+    symlink to `/private/tmp`, so a breakpoint's `file://` URL must match the real path to bind.
+    `stopOnEntry` defaults **true** (deterministic agent control); when false the entry break auto-resumes
+    *unless* a user breakpoint resolved to the entry line. Resume/step clear `paused` synchronously so a
+    follow-up evaluate can't reuse stale call-frame ids. A monotonic `gen` token guards against a slow,
+    superseded `start()` tearing down a newer session. Browser debugging is **Phase 2** (deferred).
 
 ## Workflow
 

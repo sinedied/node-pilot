@@ -263,6 +263,198 @@ export function buildActions(controller: Controller): ActionDefinition[] {
       inputSchema: { type: "object", properties: { lane: { type: "string" } }, required: ["lane"] },
       handler: async (ctx: ActionContext) => controller.fixIssue(String(ctx.input?.lane)),
     },
+    // ---- Debugger (CDP) ----------------------------------------------------
+    {
+      name: "debug_start",
+      description:
+        "Launch a Node.js program under the debugger (node --inspect-brk). Provide { program } (path to a .js/.ts entry, resolved against the project dir) and optional { args, stopOnEntry, pauseOnExceptions }. By default it stops at entry so you can set breakpoints before calling debug_continue. pauseOnExceptions is 'none'|'uncaught'|'all'.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          program: { type: "string" },
+          args: { type: "array", items: { type: "string" } },
+          stopOnEntry: { type: "boolean" },
+          pauseOnExceptions: { type: "string", enum: ["none", "uncaught", "all"] },
+        },
+        required: ["program"],
+      },
+      handler: async (ctx: ActionContext) =>
+        controller.debugStart({
+          program: ctx.input?.program as string,
+          args: (ctx.input?.args as string[]) || undefined,
+          stopOnEntry: ctx.input?.stopOnEntry as boolean | undefined,
+          pauseOnExceptions: ctx.input?.pauseOnExceptions as
+            | "none"
+            | "uncaught"
+            | "all"
+            | undefined,
+        }),
+    },
+    {
+      name: "debug_attach",
+      description:
+        "Attach the debugger to an already-running Node.js inspector (e.g. a process started with --inspect). Provide { port } (default 9229) and optional { host } or a full { url } (ws://…). Use this to debug the dev server or test runner.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          host: { type: "string" },
+          port: { type: "number" },
+          url: { type: "string" },
+          pauseOnExceptions: { type: "string", enum: ["none", "uncaught", "all"] },
+        },
+      },
+      handler: async (ctx: ActionContext) =>
+        controller.debugAttach({
+          host: ctx.input?.host as string | undefined,
+          port: ctx.input?.port as number | undefined,
+          url: ctx.input?.url as string | undefined,
+          pauseOnExceptions: ctx.input?.pauseOnExceptions as
+            | "none"
+            | "uncaught"
+            | "all"
+            | undefined,
+        }),
+    },
+    {
+      name: "debug_stop",
+      description:
+        "Stop the active debug session (kills a launched process; detaches an attached one). Breakpoints are kept for the next run.",
+      handler: async () => controller.debugStop(),
+    },
+    {
+      name: "debug_set_breakpoint",
+      description:
+        "Set (or replace) a breakpoint. Provide { file, line } (1-based line; file resolved against the project dir) and optional { column, condition }. Can be called before debug_start; pending breakpoints are applied when the session connects. Returns the breakpoint with `verified` once the inspector resolves it.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          file: { type: "string" },
+          line: { type: "number" },
+          column: { type: "number" },
+          condition: { type: "string" },
+        },
+        required: ["file", "line"],
+      },
+      handler: async (ctx: ActionContext) =>
+        controller.debugSetBreakpoint({
+          file: String(ctx.input?.file),
+          line: Number(ctx.input?.line),
+          column: ctx.input?.column as number | undefined,
+          condition: ctx.input?.condition as string | undefined,
+        }),
+    },
+    {
+      name: "debug_remove_breakpoint",
+      description:
+        "Remove a breakpoint by { id } (as returned by debug_set_breakpoint / debug_list_breakpoints) or by { file, line }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "string" },
+          file: { type: "string" },
+          line: { type: "number" },
+        },
+      },
+      handler: async (ctx: ActionContext) =>
+        controller.debugRemoveBreakpoint({
+          id: ctx.input?.id as string | undefined,
+          file: ctx.input?.file as string | undefined,
+          line: ctx.input?.line as number | undefined,
+        }),
+    },
+    {
+      name: "debug_list_breakpoints",
+      description: "List all breakpoints (with their verified state and CDP ids).",
+      handler: () => controller.debugListBreakpoints(),
+    },
+    {
+      name: "debug_continue",
+      description:
+        "Resume execution until the next breakpoint or pause. Requires the target to be paused.",
+      handler: async () => controller.debugContinue(),
+    },
+    {
+      name: "debug_pause",
+      description: "Pause the running target as soon as possible.",
+      handler: async () => controller.debugPause(),
+    },
+    {
+      name: "debug_step_over",
+      description:
+        "Step over the current line (run called functions without stepping into them). Requires a paused target.",
+      handler: async () => controller.debugStepOver(),
+    },
+    {
+      name: "debug_step_into",
+      description: "Step into the function call on the current line. Requires a paused target.",
+      handler: async () => controller.debugStepInto(),
+    },
+    {
+      name: "debug_step_out",
+      description: "Step out of the current function back to its caller. Requires a paused target.",
+      handler: async () => controller.debugStepOut(),
+    },
+    {
+      name: "debug_wait_for_pause",
+      description:
+        "Block until the target next pauses (breakpoint, step, exception or entry), then return the pause reason and call stack. Resolves immediately if already paused. Optional { timeoutMs } (default 30000, max 120000). Use this after debug_continue / debug_step_* to observe where execution stopped.",
+      inputSchema: { type: "object", properties: { timeoutMs: { type: "number" } } },
+      handler: async (ctx: ActionContext) =>
+        controller.debugWaitForPause(ctx.input?.timeoutMs as number | undefined),
+    },
+    {
+      name: "debug_get_stack",
+      description:
+        "Get the current call stack while paused: each frame's function name, file, line/column and a frameId to pass to debug_get_variables / debug_evaluate.",
+      handler: () => controller.debugGetStack(),
+    },
+    {
+      name: "debug_get_variables",
+      description:
+        "While paused, get the variables in scope for a frame, grouped by scope (local, closure, …). Optional { frameId } (defaults to the top frame) and { includeGlobal } to also dump the (large) global scope. Object/array values include an `objectId` you can expand with debug_get_properties.",
+      inputSchema: {
+        type: "object",
+        properties: { frameId: { type: "string" }, includeGlobal: { type: "boolean" } },
+      },
+      handler: async (ctx: ActionContext) =>
+        controller.debugGetVariables({
+          frameId: ctx.input?.frameId as string | undefined,
+          includeGlobal: Boolean(ctx.input?.includeGlobal),
+        }),
+    },
+    {
+      name: "debug_get_properties",
+      description:
+        "Expand an object/array by its `objectId` (from debug_get_variables or debug_evaluate) and return its properties.",
+      inputSchema: {
+        type: "object",
+        properties: { objectId: { type: "string" } },
+        required: ["objectId"],
+      },
+      handler: async (ctx: ActionContext) =>
+        controller.debugGetProperties(String(ctx.input?.objectId)),
+    },
+    {
+      name: "debug_evaluate",
+      description:
+        "Evaluate a JavaScript expression. While paused it runs in the context of a call frame (defaults to the top frame; pass { frameId } to choose another) so locals are in scope; otherwise it runs in the global REPL context. Returns the value (with an `objectId` for non-primitives).",
+      inputSchema: {
+        type: "object",
+        properties: { expression: { type: "string" }, frameId: { type: "string" } },
+        required: ["expression"],
+      },
+      handler: async (ctx: ActionContext) =>
+        controller.debugEvaluate({
+          expression: String(ctx.input?.expression),
+          frameId: ctx.input?.frameId as string | undefined,
+        }),
+    },
+    {
+      name: "debug_get_state",
+      description:
+        "Get the debugger status: stopped|starting|running|paused, the target, the current pause (reason + stack) and the breakpoint list.",
+      handler: () => controller.debugGetState(),
+    },
   ];
 
   // Anchor to the session's working directory before every action runs.

@@ -258,6 +258,69 @@ export interface DevState {
   _handle: ProcessHandle | null;
 }
 
+// ---- Debugger (CDP-backed) ------------------------------------------------
+
+export type DebugStatus = "stopped" | "starting" | "running" | "paused";
+
+export interface DebugBreakpoint {
+  // Stable client id ("<absFile>:<line>:<column>"); survives reconnects.
+  id: string;
+  file: string;
+  line: number;
+  column?: number;
+  condition?: string;
+  // True once the V8 Inspector resolved the breakpoint to a real location.
+  verified: boolean;
+  // CDP breakpointId (present only while a session is connected).
+  cdpId?: string;
+}
+
+export interface DebugScope {
+  type: string;
+  name?: string;
+  // Runtime remote-object id used to lazily fetch the scope's variables.
+  objectId?: string;
+}
+
+export interface DebugFrame {
+  // CDP callFrameId — pass it to evaluate / get_variables.
+  id: string;
+  functionName: string;
+  file: string | null;
+  url: string | null;
+  line: number;
+  column: number;
+  scopes: DebugScope[];
+}
+
+export interface DebugPaused {
+  reason: string;
+  text: string | null;
+  frames: DebugFrame[];
+  topFrameId: string | null;
+}
+
+export interface DebugTarget {
+  mode: "launch" | "attach";
+  program: string | null;
+  args: string[];
+  host: string | null;
+  port: number | null;
+  url: string | null;
+  pid: number | null;
+}
+
+// Serialized debugger state exposed via getState() and the snapshot.
+export interface DebugState {
+  status: DebugStatus;
+  target: DebugTarget | null;
+  paused: DebugPaused | null;
+  breakpoints: DebugBreakpoint[];
+  reason: string | null;
+  output: string;
+  console: string;
+}
+
 // ---- TypeScript language server (live diagnostics) ------------------------
 
 export type DiagnosticCategory = "error" | "warning" | "suggestion" | "message";

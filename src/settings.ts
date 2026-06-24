@@ -12,7 +12,15 @@ const FILE = path.join(DIR, "settings.json");
 
 // Canonical tab ids (must match data-tab values in public/index.html). Used to
 // sanitize persisted tabOrder/hiddenTabs so stale/unknown ids can't leak in.
-export const KNOWN_TABS = ["info", "preview", "tests", "problems", "deps", "console"] as const;
+export const KNOWN_TABS = [
+  "info",
+  "preview",
+  "tests",
+  "problems",
+  "deps",
+  "debugger",
+  "console",
+] as const;
 const KNOWN_TAB_SET = new Set<string>(KNOWN_TABS);
 
 const DEFAULTS: Settings = {

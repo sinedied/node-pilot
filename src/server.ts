@@ -179,6 +179,34 @@ async function handleApi(
       return sendJson(res, 200, await controller.sendCopilotAuditFix());
     case "POST /api/fix":
       return sendJson(res, 200, await controller.fixIssue(body.lane));
+    case "POST /api/debug/start":
+      return sendJson(res, 200, await controller.debugStart(body));
+    case "POST /api/debug/attach":
+      return sendJson(res, 200, await controller.debugAttach(body));
+    case "POST /api/debug/stop":
+      return sendJson(res, 200, await controller.debugStop());
+    case "POST /api/debug/breakpoint":
+      return sendJson(res, 200, await controller.debugSetBreakpoint(body));
+    case "POST /api/debug/breakpoint/remove":
+      return sendJson(res, 200, await controller.debugRemoveBreakpoint(body));
+    case "POST /api/debug/continue":
+      return sendJson(res, 200, await controller.debugContinue());
+    case "POST /api/debug/pause":
+      return sendJson(res, 200, await controller.debugPause());
+    case "POST /api/debug/step-over":
+      return sendJson(res, 200, await controller.debugStepOver());
+    case "POST /api/debug/step-into":
+      return sendJson(res, 200, await controller.debugStepInto());
+    case "POST /api/debug/step-out":
+      return sendJson(res, 200, await controller.debugStepOut());
+    case "POST /api/debug/wait":
+      return sendJson(res, 200, await controller.debugWaitForPause(body.timeoutMs));
+    case "POST /api/debug/variables":
+      return sendJson(res, 200, await controller.debugGetVariables(body));
+    case "POST /api/debug/properties":
+      return sendJson(res, 200, await controller.debugGetProperties(body.objectId));
+    case "POST /api/debug/evaluate":
+      return sendJson(res, 200, await controller.debugEvaluate(body));
     default:
       return sendJson(res, 404, { ok: false, reason: "Unknown endpoint." });
   }
