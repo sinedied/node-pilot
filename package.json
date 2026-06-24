@@ -42,10 +42,10 @@
     "@astrojs/starlight": "^0.40.0",
     "@biomejs/biome": "^2.5.1",
     "@types/node": "^22.10.0",
-    "@vitest/coverage-v8": "^3.0.0",
+    "@vitest/coverage-v8": "^4.1.9",
     "astro": "^6.4.8",
     "sharp": "^0.35.2",
     "typescript": "^6.0.3",
-    "vitest": "^3.0.0"
+    "vitest": "^4.1.9"
   }
 }
