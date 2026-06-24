@@ -36,7 +36,7 @@ afterAll(async () => {
 });
 
 describe.skipIf(!online)("dependency safe-update loop", () => {
-  const controller = new Controller(dir, { sendToChat: async () => {} });
+  const controller = new Controller(dir, { autoRun: false, sendToChat: async () => {} });
 
   it("lists is-odd as an outdated patch bump", async () => {
     await controller.init();

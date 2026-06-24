@@ -80,6 +80,9 @@ const TS_IDLE_MS = 10 * 60 * 1000;
 export interface ControllerOptions {
   sendToChat?: (prompt: string) => Promise<void> | void;
   sendImageToChat?: (prompt: string, dataBase64: string, mimeType: string) => Promise<void> | void;
+  // Run the user's configured on-load tasks after the first detection. Defaults
+  // to true; tests/hosts can disable it for deterministic, race-free runs.
+  autoRun?: boolean;
 }
 
 interface LaneRunResult {
@@ -106,6 +109,7 @@ export class Controller {
   cwd: string;
   sendToChat: (prompt: string) => Promise<void> | void;
   sendImageToChat: (prompt: string, dataBase64: string, mimeType: string) => Promise<void> | void;
+  autoRun: boolean;
   events: EventEmitter;
   detection: Detection | null;
   lanes: Record<string, LaneState>;
@@ -130,10 +134,11 @@ export class Controller {
   _autoRanFor: Set<string>;
   _autoRunning: boolean;
 
-  constructor(cwd: string, { sendToChat, sendImageToChat }: ControllerOptions = {}) {
+  constructor(cwd: string, { sendToChat, sendImageToChat, autoRun }: ControllerOptions = {}) {
     this.cwd = cwd;
     this.sendToChat = sendToChat || (async () => {});
     this.sendImageToChat = sendImageToChat || (async () => {});
+    this.autoRun = autoRun !== false;
     this.events = new EventEmitter();
     this.events.setMaxListeners(100);
     this.detection = null;
@@ -211,7 +216,7 @@ export class Controller {
     this.broadcast({ type: "detection", detection: this.detection });
     // Fire the configured on-load tasks once per project path, after the first
     // successful project detection (a shared process can serve several projects).
-    if (!this._autoRanFor.has(this.cwd) && this.detection.hasProject) {
+    if (this.autoRun && !this._autoRanFor.has(this.cwd) && this.detection.hasProject) {
       this._autoRanFor.add(this.cwd);
       this.runAutoTasks().catch((e) => this.log(String(e), "error"));
     }

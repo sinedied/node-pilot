@@ -127,7 +127,8 @@ inspiration: [coffilot](https://github.com/jdubois/coffilot). Full design in
   changing the origin and wiping `localStorage`. See `src/settings.ts`. The schema
   carries `theme`, `pinnedTasks`, plus the tab/auto-run prefs: `tabOrder` (string[] of
   tab ids, or `null` → materialized to the default order), `hiddenTabs` (string[]), and
-  `autoLint`/`autoTest`/`autoDeps` (booleans). `migrate()`/`saveSettings()` sanitize
+  `autoLint`/`autoTest`/`autoDeps` (booleans, **default ON** — only an explicit
+  persisted `false` disables them). `migrate()`/`saveSettings()` sanitize
   ids against `KNOWN_TABS` and coerce booleans; the client fetches them via
   `GET /api/settings` (not in `getState()`) and persists patches via `POST /api/settings`.
   `applyTabLayout()` in `app.js` reorders `#tabs` buttons and `.tab-hidden`-toggles
@@ -154,8 +155,8 @@ inspiration: [coffilot](https://github.com/jdubois/coffilot). Full design in
   groups. The "special" built-in tasks are **build / lint / format / test** (`LANE_TASKS`);
   each binds to its first present candidate script (`LANE_CANDIDATES`, mirroring
   `lanes.ts` `laneScript()`/`pickScript`). A script that backs a special is shown
-  **bold + ★ + a muted task-label chip** and runs/pins as the **lane** (no duplicate
-  lane/script row); built-in specials with no backing script (e.g. Lint/Format via Biome)
+  **bold with an accent star octicon (`oct-star-fill`) after the name** and runs/pins
+  as the **lane** (no duplicate lane/script row); built-in specials with no backing script (e.g. Lint/Format via Biome)
   are listed as script-less specials **at the top**. Other same-family scripts
   (`lint:fix`, `format:check`, `test:watch`) stay ordinary. `defaultPinnedTasks()`
   (`lanes.ts`) follows the same order. **Type-check is no longer a promoted task** — the

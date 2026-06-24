@@ -40,6 +40,17 @@ describe("settings migration", () => {
     expect(migrate(undefined).pinnedTasks).toBeNull();
     expect(migrate({ theme: "light" }).pinnedTasks).toBeNull();
   });
+
+  it("defaults the on-load auto-runs ON, but respects an explicit false", () => {
+    const fresh = migrate(undefined);
+    expect(fresh.autoLint).toBe(true);
+    expect(fresh.autoTest).toBe(true);
+    expect(fresh.autoDeps).toBe(true);
+    const off = migrate({ autoLint: false, autoTest: false, autoDeps: false } as never);
+    expect(off.autoLint).toBe(false);
+    expect(off.autoTest).toBe(false);
+    expect(off.autoDeps).toBe(false);
+  });
 });
 
 describe("defaultPinnedTasks", () => {

@@ -44,6 +44,7 @@ test("fails", () => { assert.equal(1 + 1, 3); });
 `,
   );
   controller = new Controller(dir, {
+    autoRun: false,
     sendToChat: async (p) => {
       chatPrompt = p;
     },

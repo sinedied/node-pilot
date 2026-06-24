@@ -20,9 +20,9 @@ const DEFAULTS: Settings = {
   theme: "auto",
   tabOrder: null,
   hiddenTabs: [],
-  autoLint: false,
-  autoTest: false,
-  autoDeps: false,
+  autoLint: true,
+  autoTest: true,
+  autoDeps: true,
 };
 
 const LANE_IDS = new Set<LaneId>(["build", "typecheck", "lint", "format", "test"]);
@@ -69,9 +69,11 @@ export function migrate(raw: Partial<Settings> | undefined): Settings {
     // treat it as "no order set" and fall back to the default.
     tabOrder: tabOrder?.length ? tabOrder : null,
     hiddenTabs: sanitizeTabs(raw?.hiddenTabs),
-    autoLint: raw?.autoLint === true,
-    autoTest: raw?.autoTest === true,
-    autoDeps: raw?.autoDeps === true,
+    // The on-load auto-runs default ON; only an explicit persisted `false`
+    // disables them (so a brand-new project pre-populates its tabs).
+    autoLint: raw?.autoLint !== false,
+    autoTest: raw?.autoTest !== false,
+    autoDeps: raw?.autoDeps !== false,
   };
   if (raw && "pinnedTasks" in raw) {
     return { pinnedTasks: sanitizeTasks(raw.pinnedTasks), ...extras };

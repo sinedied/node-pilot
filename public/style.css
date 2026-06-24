@@ -648,36 +648,31 @@ body {
   font-size: 12px;
 }
 
-/* Special (built-in) task rows: ★ marker + a muted task-label chip. */
+/* Special (built-in) task rows: bold name + an accent star octicon after the
+   name. An SVG icon aligns cleanly with the text (the ★ glyph sat low). */
 .menu-item.special .menu-name {
   font-weight: var(--font-weight-semibold, 600);
-  display: flex;
+}
+
+.task-mark {
+  display: inline-flex;
   align-items: center;
-  gap: 6px;
+  vertical-align: middle;
+  color: var(--accent);
 }
 
 .menu-item .task-mark {
-  color: var(--accent);
-  font-size: 11px;
-  line-height: 1;
+  margin-left: 6px;
 }
 
-.menu-item .task-chip {
-  font-family: var(--sans, inherit);
-  font-weight: 500;
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  color: var(--dim);
-  background: var(--bg-inset);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 1px 7px;
+.menu-item .task-mark .oi {
+  width: 11px;
+  height: 11px;
 }
 
 .menu-foot {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 5px;
   margin-top: 4px;
   padding: 6px 8px 2px;
@@ -686,8 +681,9 @@ body {
   color: var(--dim);
 }
 
-.menu-foot .task-mark {
-  color: var(--accent);
+.menu-foot .task-mark .oi {
+  width: 12px;
+  height: 12px;
 }
 
 /* ---- Segmented control ---- */

@@ -656,7 +656,12 @@ function renderPinned() {
   const wrap = $("#pinned");
   wrap.innerHTML = "";
   const hasProject = !!state.detection?.hasProject;
-  const tasks = (state.settings.pinnedTasks || []).filter(taskAvailable);
+  // Keep toolbar buttons in the canonical task order (package.json order, with
+  // script-less specials first) regardless of the order tasks were pinned in.
+  const order = new Map(classifyTasks().map((e, i) => [taskKey(e.task), i]));
+  const tasks = (state.settings.pinnedTasks || [])
+    .filter(taskAvailable)
+    .sort((a, b) => (order.get(taskKey(a)) ?? Infinity) - (order.get(taskKey(b)) ?? Infinity));
   for (const t of tasks) {
     const b = document.createElement("button");
     b.className = "lane-btn task";
@@ -721,8 +726,18 @@ function classifyTasks() {
   return entries;
 }
 
+// A small accent star-fill octicon used to flag "special" (built-in) tasks. An
+// SVG icon (vs a ★ glyph) aligns cleanly with the text like every other icon.
+function starMark() {
+  const m = document.createElement("span");
+  m.className = "task-mark";
+  m.setAttribute("aria-hidden", "true");
+  m.innerHTML = '<svg class="oi"><use href="#oct-star-fill" /></svg>';
+  return m;
+}
+
 // Render one dropdown row: a pin checkbox plus a run label. Special tasks get a
-// ★ marker; script-backed specials also show a muted task-label chip.
+// star marker after the name (explained by the menu footnote).
 function renderTaskItem(e) {
   const item = document.createElement("div");
   item.className = e.special ? "menu-item special" : "menu-item";
@@ -734,20 +749,13 @@ function renderTaskItem(e) {
   const label = document.createElement("span");
   label.className = "menu-name";
   label.title = "Run now";
-  if (e.special) {
-    const mark = document.createElement("span");
-    mark.className = "task-mark";
-    mark.textContent = "★";
-    label.append(mark);
-  }
   // Script-backed specials and ordinary scripts show the script name; script-less
   // specials show the task label.
   label.append(document.createTextNode(e.scriptName || e.taskLabel));
-  if (e.special && e.scriptName) {
-    const chip = document.createElement("span");
-    chip.className = "task-chip";
-    chip.textContent = e.taskLabel;
-    label.append(chip);
+  if (e.special) {
+    const mark = starMark();
+    mark.title = "Built-in task";
+    label.append(mark);
   }
   label.addEventListener("click", () => {
     runTask(e.task);
@@ -773,11 +781,8 @@ function renderScriptsMenu() {
   if (anySpecial) {
     const note = document.createElement("div");
     note.className = "menu-foot";
-    const mark = document.createElement("span");
-    mark.className = "task-mark";
-    mark.textContent = "★";
     note.append(
-      mark,
+      starMark(),
       document.createTextNode(" Built-in task — output is parsed into its tab (Tests, Problems…)."),
     );
     menu.append(note);
