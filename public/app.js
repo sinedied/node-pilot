@@ -266,32 +266,45 @@ function tabLabelOf(b) {
 }
 
 // Map an overflowable tab button to its (visible) badge element, if any.
+// Keyed by data-tab (not id — deps/debugger buttons have no id). The Debugger
+// tab has no badge by design.
+const TAB_BADGE_SEL = {
+  problems: "#problems-badge",
+  tests: "#tests-badge",
+  deps: "#deps-badge",
+};
 function tabBadgeOf(btn) {
-  const sel = { "tabbtn-problems": "#problems-badge", "tabbtn-tests": "#tests-badge" }[btn?.id];
+  const sel = TAB_BADGE_SEL[btn?.dataset?.tab];
   if (!sel) return null;
   const el = $(sel);
   return el && !el.classList.contains("hidden") ? el : null;
 }
 
-// Mirror the most severe Problems/Tests badge onto the More button when those
-// tabs are collapsed into the overflow menu, so issues stay visible when hidden.
+// Severity rank of a badge element: error (red) > warning (yellow) > default (blue).
+function badgeSeverity(el) {
+  if (el.classList.contains("error")) return 3;
+  if (el.classList.contains("warning")) return 2;
+  return 1;
+}
+
+// Mirror hidden tabs' badges onto the More button as a single severity dot (no
+// number): summing counts across tabs would be misleading (different units), so
+// we just signal "something's in here" colored by the most severe hidden badge.
+// Per-tab counts stay visible in the dropdown (buildTabMoreMenu).
 function syncTabMoreBadge() {
   const badge = $("#tab-more-badge");
-  let chosen = null;
+  let severity = 0;
   for (const b of overflowTabs) {
     const el = tabBadgeOf(b);
-    if (!el) continue;
-    if (!chosen || (el.classList.contains("error") && !chosen.classList.contains("error"))) {
-      chosen = el;
-    }
+    if (el) severity = Math.max(severity, badgeSeverity(el));
   }
-  if (chosen) {
-    badge.textContent = chosen.textContent;
-    badge.className = chosen.className;
-  } else {
+  if (!severity) {
     badge.textContent = "";
     badge.className = "tab-badge hidden";
+    return;
   }
+  badge.textContent = "";
+  badge.className = `tab-badge dot${severity === 3 ? " error" : severity === 2 ? " warning" : ""}`;
 }
 
 function buildTabMoreMenu() {
@@ -1703,7 +1716,6 @@ function renderDebugger() {
   renderDebugStack();
   renderDebugVariables();
   renderDebugBreakpoints();
-  renderDebuggerBadge();
 }
 
 function renderDebugStack() {
@@ -1794,23 +1806,6 @@ function renderDebugBreakpoints() {
       </div>`;
     })
     .join("");
-}
-
-function renderDebuggerBadge() {
-  const badge = $("#debugger-badge");
-  if (!badge) return;
-  const d = state.debug;
-  const n = (d.breakpoints || []).length;
-  if (d.status === "paused") {
-    badge.textContent = n ? String(n) : "•";
-    badge.className = "tab-badge warning";
-  } else if (n) {
-    badge.textContent = String(n);
-    badge.className = "tab-badge";
-  } else {
-    badge.className = "tab-badge hidden";
-  }
-  recomputeTabOverflow();
 }
 
 // Fetch the variables for the currently selected frame and re-render the tree.

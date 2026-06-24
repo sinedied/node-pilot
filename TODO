@@ -36,12 +36,11 @@ Instead of pills, extract proper information about the project. Suggest useful i
   * audit should return more info, like which packages are vulnerable and if they have a fix available, and link to the advisories. 
   * remove the check outdated/audit buttons, should be a single refresh button for consistency with the other tabs. 
   * Safe update should become "update with Copilot" button, following the scope option selected. The behavior is to send the prompt for which packages to update and still runs all possible checks (lint, test, audit) after the update. If any of these checks fail, the update is reverted and a message is reported to the user (through Copilot) that the update failed and why. 
-
-- [ ] badges disappearing or not when folded under ... tabs
-
-- [ ] new debugger tab:
+- [x] new debugger tab:
   * this debugger tab should be a full-featured debugger, with breakpoints, step over, step into, step out, etc. It should also have a console for evaluating expressions and inspecting variables. The debugger should be able to attach to a running process or start a new process. It should support Node.js and browser debugging.
   * Important: this debugger should be exposed to the agent, so that the agent can use it to debug code. The agent should be able to set breakpoints, step through code, and inspect variables. The agent should also be able to evaluate expressions in the console. This is the most important feature
+
+- [ ] badges disappearing or not when folded under ... tabs
 
 - [ ] Design pass: Fix with copilot button consistency, with a nice gradient border
   * Store design rules, understanding and decisions in AGENTS.md

@@ -1218,6 +1218,12 @@ main {
 .tab-badge.hidden {
   display: none;
 }
+.tab-badge.dot {
+  min-width: 8px;
+  width: 8px;
+  height: 8px;
+  padding: 0;
+}
 .tab-badge.error {
   background: var(--red);
 }

@@ -303,4 +303,8 @@ The agent dev loop for any change:
   horizontal overflow. Let content wrap, scroll, or collapse into a menu instead. The
   canonical example is the tab bar: tabs that don't fit collapse into a trailing `⋯`
   (More) overflow menu (`recomputeTabOverflow()` in `public/app.js`). When changing the
-  UI, verify it at a narrow panel width, not just wide.
+  UI, verify it at a narrow panel width, not just wide. Tab badges follow the overflow:
+  `tabBadgeOf()` (keyed by `data-tab` → `#problems/#tests/#deps-badge`; Debugger has no
+  badge) feeds both the dropdown items (each shows its own count) and `syncTabMoreBadge()`,
+  which collapses hidden badges into a single **severity dot** on `⋯` (red > yellow > blue,
+  no number — counts across tabs aren't summable).
