@@ -4,7 +4,7 @@
 import path from "node:path";
 import { writeFile } from "node:fs/promises";
 import { run } from "./process-runner.ts";
-import { readText } from "./util.ts";
+import { readText, pushCapped } from "./util.ts";
 import {
   outdated as pmOutdated,
   audit as pmAudit,
@@ -453,109 +453,129 @@ export async function safeUpdate(
     startedAt: Date.now(),
   };
   controller.deps.update = update;
+  const lane = controller.lanes.update;
+  if (lane) {
+    lane.status = "running";
+    lane.label = "Update dependencies";
+    lane.exitCode = null;
+    lane.output = [];
+    lane.startedAt = Date.now();
+    lane.endedAt = null;
+  }
   const log: Log = (chunk) => {
     update.log.push(chunk);
-    controller.broadcast({ type: "deps:update-log", chunk });
+    if (lane) pushCapped(lane.output, chunk);
+    controller.broadcast({ type: "lane:data", lane: "update", chunk });
   };
-  controller.broadcast({ type: "deps:update-start", scope });
+  controller.broadcast({ type: "lane:start", lane: "update", label: "Update dependencies" });
 
-  // Resolve targets.
-  let targets: UpdateTarget[];
-  if (packages?.length) {
-    targets = packages.map((p) => {
-      const at = p.lastIndexOf("@");
-      return at > 0
-        ? { name: p.slice(0, at), version: p.slice(at + 1) }
-        : { name: p, version: "latest" };
-    });
-  } else {
-    const od = controller.deps.outdated?.list || (await listOutdated(controller)).list;
-    targets = selectByScope(od || [], scope);
-  }
-
-  if (!targets.length) {
-    log("Nothing to update for the selected scope.\n");
-    return finish(controller, update, []);
-  }
-
-  const manifestPath = path.join(controller.cwd, "package.json");
-  const lockName = lockfileFor(d.pm);
-  const lockPath = path.join(controller.cwd, lockName);
-  const snap: Snapshot = { manifest: await readText(manifestPath), lock: await readText(lockPath) };
-  const manifestJson = JSON.parse(snap.manifest || "{}");
-  const devSet = new Set<string>(Object.keys(manifestJson.devDependencies || {}));
-  // null/undefined verify → sensible defaults; an explicit [] means "no verify".
-  const steps = verify == null ? defaultVerify(d) : verify;
-  // Keep the pre-update snapshot so rollback_last_update can restore it.
-  update._snapshot = { manifest: snap.manifest, lock: snap.lock, lockName };
-
-  log(`Targets (${targets.length}): ${targets.map((t) => `${t.name}@${t.version}`).join(", ")}\n`);
-  log(`Verify steps: ${steps.join(", ") || "(install only)"}\n\n`);
-
-  // Attempt 1: all together.
-  log("▶ Applying all updates together…\n");
-  const res = await applyAndVerify(controller, targets, devSet, steps, log);
-  if (res.ok) {
-    log("\n✓ All updates applied and verified.\n");
-    await listOutdated(controller).catch(() => {});
-    return finish(controller, update, targets);
-  }
-
-  log(`\n✗ Combined update failed at "${res.step}". Rolling back and isolating culprits…\n`);
-  await restore(controller, snap, manifestPath, lockPath, log);
-
-  // Attempt 2: isolate each package from a clean base.
-  const kept: UpdateTarget[] = [];
-  const failed: UpdateFailure[] = [];
-  for (const t of targets) {
-    log(`\n▶ Testing ${t.name}@${t.version} in isolation…\n`);
-    await restore(controller, snap, manifestPath, lockPath);
-    const r = await applyAndVerify(controller, [t], devSet, steps, log);
-    if (r.ok) {
-      log(`  ✓ ${t.name} is safe.\n`);
-      kept.push(t);
+  try {
+    // Resolve targets.
+    let targets: UpdateTarget[];
+    if (packages?.length) {
+      targets = packages.map((p) => {
+        const at = p.lastIndexOf("@");
+        return at > 0
+          ? { name: p.slice(0, at), version: p.slice(at + 1) }
+          : { name: p, version: "latest" };
+      });
     } else {
-      log(`  ✗ ${t.name} breaks "${r.step}".\n`);
-      failed.push({ ...t, step: r.step, output: r.output });
+      const od = controller.deps.outdated?.list || (await listOutdated(controller)).list;
+      targets = selectByScope(od || [], scope);
     }
-  }
 
-  // Apply the safe set from a clean base.
-  await restore(controller, snap, manifestPath, lockPath);
-  if (kept.length) {
-    log(`\n▶ Applying ${kept.length} safe update(s)…\n`);
-    const combined = await applyAndVerify(controller, kept, devSet, steps, log);
-    if (!combined.ok) {
-      // Rare cross-package interaction: fall back to cumulative application.
-      log(`  ✗ Safe set failed together at "${combined.step}"; applying cumulatively…\n`);
+    if (!targets.length) {
+      log("Nothing to update for the selected scope.\n");
+      return finish(controller, update, []);
+    }
+
+    const manifestPath = path.join(controller.cwd, "package.json");
+    const lockName = lockfileFor(d.pm);
+    const lockPath = path.join(controller.cwd, lockName);
+    const snap: Snapshot = {
+      manifest: await readText(manifestPath),
+      lock: await readText(lockPath),
+    };
+    const manifestJson = JSON.parse(snap.manifest || "{}");
+    const devSet = new Set<string>(Object.keys(manifestJson.devDependencies || {}));
+    // null/undefined verify → sensible defaults; an explicit [] means "no verify".
+    const steps = verify == null ? defaultVerify(d) : verify;
+    // Keep the pre-update snapshot so rollback_last_update can restore it.
+    update._snapshot = { manifest: snap.manifest, lock: snap.lock, lockName };
+
+    log(
+      `Targets (${targets.length}): ${targets.map((t) => `${t.name}@${t.version}`).join(", ")}\n`,
+    );
+    log(`Verify steps: ${steps.join(", ") || "(install only)"}\n\n`);
+
+    // Attempt 1: all together.
+    log("▶ Applying all updates together…\n");
+    const res = await applyAndVerify(controller, targets, devSet, steps, log);
+    if (res.ok) {
+      log("\n✓ All updates applied and verified.\n");
+      await listOutdated(controller).catch(() => {});
+      return finish(controller, update, targets);
+    }
+
+    log(`\n✗ Combined update failed at "${res.step}". Rolling back and isolating culprits…\n`);
+    await restore(controller, snap, manifestPath, lockPath, log);
+
+    // Attempt 2: isolate each package from a clean base.
+    const kept: UpdateTarget[] = [];
+    const failed: UpdateFailure[] = [];
+    for (const t of targets) {
+      log(`\n▶ Testing ${t.name}@${t.version} in isolation…\n`);
       await restore(controller, snap, manifestPath, lockPath);
-      const cumulative: UpdateTarget[] = [];
-      for (const t of kept) {
-        const rr = await applyAndVerify(controller, [...cumulative, t], devSet, steps, log);
-        if (rr.ok) cumulative.push(t);
-        else failed.push({ ...t, step: rr.step, output: rr.output });
+      const r = await applyAndVerify(controller, [t], devSet, steps, log);
+      if (r.ok) {
+        log(`  ✓ ${t.name} is safe.\n`);
+        kept.push(t);
+      } else {
+        log(`  ✗ ${t.name} breaks "${r.step}".\n`);
+        failed.push({ ...t, step: r.step, output: r.output });
       }
-      await restore(controller, snap, manifestPath, lockPath);
-      if (cumulative.length) await applyTargets(controller, cumulative, devSet, log);
-      kept.length = 0;
-      kept.push(...cumulative);
     }
-  }
 
-  log(
-    `\nDone. Kept ${kept.length} update(s)${failed.length ? `, rolled back ${failed.length}: ${failed.map((f) => f.name).join(", ")}` : ""}.\n`,
-  );
-  await listOutdated(controller).catch(() => {});
+    // Apply the safe set from a clean base.
+    await restore(controller, snap, manifestPath, lockPath);
+    if (kept.length) {
+      log(`\n▶ Applying ${kept.length} safe update(s)…\n`);
+      const combined = await applyAndVerify(controller, kept, devSet, steps, log);
+      if (!combined.ok) {
+        // Rare cross-package interaction: fall back to cumulative application.
+        log(`  ✗ Safe set failed together at "${combined.step}"; applying cumulatively…\n`);
+        await restore(controller, snap, manifestPath, lockPath);
+        const cumulative: UpdateTarget[] = [];
+        for (const t of kept) {
+          const rr = await applyAndVerify(controller, [...cumulative, t], devSet, steps, log);
+          if (rr.ok) cumulative.push(t);
+          else failed.push({ ...t, step: rr.step, output: rr.output });
+        }
+        await restore(controller, snap, manifestPath, lockPath);
+        if (cumulative.length) await applyTargets(controller, cumulative, devSet, log);
+        kept.length = 0;
+        kept.push(...cumulative);
+      }
+    }
 
-  // Hand the breaking packages to Copilot.
-  if (failed.length) {
-    update.fixPrompt = buildDepsFixPrompt({
-      failures: failed,
-      verifyStep: failed[0].step,
-      output: failed[0].output,
-    });
+    log(
+      `\nDone. Kept ${kept.length} update(s)${failed.length ? `, rolled back ${failed.length}: ${failed.map((f) => f.name).join(", ")}` : ""}.\n`,
+    );
+    await listOutdated(controller).catch(() => {});
+
+    // Hand the breaking packages to Copilot.
+    if (failed.length) {
+      update.fixPrompt = buildDepsFixPrompt({
+        failures: failed,
+        verifyStep: failed[0].step,
+        output: failed[0].output,
+      });
+    }
+    return finish(controller, update, kept, failed);
+  } catch (err) {
+    failUpdateLane(controller);
+    return { ok: false, reason: err instanceof Error ? err.message : String(err) };
   }
-  return finish(controller, update, kept, failed);
 }
 
 function finish(
@@ -568,13 +588,31 @@ function finish(
   update.kept = kept;
   update.failed = failed;
   update.endedAt = Date.now();
+  const lane = controller.lanes.update;
+  if (lane) {
+    lane.status = failed.length ? "failed" : "passed";
+    lane.exitCode = failed.length ? 1 : 0;
+    lane.endedAt = Date.now();
+  }
   controller.broadcast({
-    type: "deps:update-done",
-    kept,
-    failed,
-    fixAvailable: Boolean(update.fixPrompt),
+    type: "lane:end",
+    lane: "update",
+    status: failed.length ? "failed" : "passed",
+    exitCode: failed.length ? 1 : 0,
   });
   return { ok: true, kept, failed };
+}
+
+// Close the update lane as failed (used when an unexpected error aborts the
+// update/rollback so the lane doesn't appear stuck "running").
+function failUpdateLane(controller: Controller): void {
+  const lane = controller.lanes.update;
+  if (lane) {
+    lane.status = "failed";
+    lane.exitCode = 1;
+    lane.endedAt = Date.now();
+  }
+  controller.broadcast({ type: "lane:end", lane: "update", status: "failed", exitCode: 1 });
 }
 
 // Restore package.json + lockfile to the state captured before the last update.
@@ -587,14 +625,43 @@ export async function rollbackLast(
   const d = controller.detection as ProjectDetection;
   const manifestPath = path.join(controller.cwd, "package.json");
   const lockPath = path.join(controller.cwd, snap.lockName);
-  await writeFile(manifestPath, snap.manifest ?? "");
-  if (snap.lock != null) await writeFile(lockPath, snap.lock);
-  controller.broadcast({
-    type: "deps:update-log",
-    chunk: "Rolling back to the pre-update state…\n",
-  });
-  await run(pmInstall(d.pm), { cwd: controller.cwd });
-  await listOutdated(controller).catch(() => {});
-  controller.broadcast({ type: "deps:rollback-done" });
-  return { ok: true };
+  const lane = controller.lanes.update;
+  if (lane) {
+    lane.status = "running";
+    lane.label = "Roll back dependencies";
+    lane.exitCode = null;
+    lane.output = [];
+    lane.startedAt = Date.now();
+    lane.endedAt = null;
+  }
+  controller.broadcast({ type: "lane:start", lane: "update", label: "Roll back dependencies" });
+  const log = (chunk: string) => {
+    if (lane) pushCapped(lane.output, chunk);
+    controller.broadcast({ type: "lane:data", lane: "update", chunk });
+  };
+  log("Rolling back to the pre-update state…\n");
+  try {
+    await writeFile(manifestPath, snap.manifest ?? "");
+    if (snap.lock != null) await writeFile(lockPath, snap.lock);
+    const res = await run(pmInstall(d.pm), {
+      cwd: controller.cwd,
+      onData: (chunk) => log(chunk),
+    });
+    await listOutdated(controller).catch(() => {});
+    if (lane) {
+      lane.status = res.code === 0 ? "passed" : "failed";
+      lane.exitCode = res.code;
+      lane.endedAt = Date.now();
+    }
+    controller.broadcast({
+      type: "lane:end",
+      lane: "update",
+      status: res.code === 0 ? "passed" : "failed",
+      exitCode: res.code,
+    });
+    return { ok: true };
+  } catch (err) {
+    failUpdateLane(controller);
+    return { ok: false, reason: err instanceof Error ? err.message : String(err) };
+  }
 }

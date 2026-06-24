@@ -67,7 +67,7 @@ function formatBytes(n) {
 }
 
 let activeConsoleLane = null;
-const CONSOLE_LANES = new Set(["build", "lint", "format", "typecheck"]);
+const CONSOLE_LANES = new Set(["build", "lint", "format", "typecheck", "update"]);
 const isConsoleLane = (id) => CONSOLE_LANES.has(id) || id.startsWith("script:");
 
 // ---- Dev browser state ----------------------------------------------------
@@ -951,7 +951,9 @@ function renderConsoleStatus() {
   }
   const st = laneStatus(id);
   statusChip(chip, st);
-  fix.classList.toggle("hidden", st !== "failed");
+  // The update lane has its own agent-driven fix flow (no fixContext entry),
+  // so don't offer the generic console "fix" button for it.
+  fix.classList.toggle("hidden", st !== "failed" || id === "update");
   fix.dataset.lane = id;
 }
 
@@ -1625,18 +1627,6 @@ function renderDepsBadge() {
   recomputeTabOverflow();
 }
 
-function renderUpdate() {
-  const u = state.deps.update;
-  const log = $("#deps-log");
-  if (!u) {
-    log.classList.add("hidden");
-    return;
-  }
-  log.classList.remove("hidden");
-  log.textContent = strip((u.log || []).join(""));
-  log.scrollTop = log.scrollHeight;
-}
-
 // ---- SSE ------------------------------------------------------------------
 
 async function refreshSettings() {
@@ -1679,10 +1669,18 @@ function applyEvent(e) {
       renderDev();
       renderOutdated();
       renderAudit();
-      renderUpdate();
       renderDepsBadge();
       renderRunning();
-      if (activeConsoleLane) setConsoleLane(activeConsoleLane);
+      if (activeConsoleLane) {
+        setConsoleLane(activeConsoleLane);
+      } else {
+        // On (re)connect, surface a console lane that's mid-run (e.g. an
+        // in-progress dependency update) so its output isn't hidden.
+        const running = Object.keys(state.lanes).find(
+          (id) => isConsoleLane(id) && state.lanes[id]?.status === "running",
+        );
+        if (running) setConsoleLane(running);
+      }
       break;
     case "detection":
       state.detection = e.detection;
@@ -1699,6 +1697,7 @@ function applyEvent(e) {
         if (!e.auto) showTab("tests");
         renderTests();
       }
+      if (e.lane === "update") setDepsBusy($("#deps-update"), true);
       renderConsoleStatus();
       renderRunning();
       break;
@@ -1721,6 +1720,7 @@ function applyEvent(e) {
       lane.exitCode = e.exitCode;
       if (e.lane === activeConsoleLane) renderConsoleStatus();
       if (e.lane === "test") renderTests();
+      if (e.lane === "update") setDepsBusy($("#deps-update"), false);
       renderRunning();
       break;
     }
@@ -1784,29 +1784,6 @@ function applyEvent(e) {
       state.deps.audit = e.audit;
       renderAudit();
       renderDepsBadge();
-      break;
-    case "deps:update-start":
-      state.deps.update = { status: "running", log: [], scope: e.scope };
-      setDepsBusy($("#deps-update"), true);
-      renderUpdate();
-      break;
-    case "deps:update-log":
-      state.deps.update = state.deps.update || { log: [] };
-      state.deps.update.log.push(e.chunk);
-      renderUpdate();
-      break;
-    case "deps:update-done":
-      state.deps.update = state.deps.update || { log: [] };
-      Object.assign(state.deps.update, {
-        status: "done",
-        kept: e.kept,
-        failed: e.failed,
-        fixAvailable: e.fixAvailable,
-      });
-      setDepsBusy($("#deps-update"), false);
-      renderUpdate();
-      break;
-    case "deps:rollback-done":
       break;
   }
 }

@@ -151,6 +151,8 @@ export class Controller {
     this.detection = null;
     this.lanes = {};
     for (const id of ONE_SHOT_LANES) this.lanes[id] = this.freshLane(id);
+    // Dependency updates stream through the standard lane/Console mechanism.
+    this.lanes.update = this.freshLane("update");
     this.test = { report: null, watch: false };
     this.dev = { status: "stopped", url: null, port: null, output: [], pid: null, _handle: null };
     this.deps = { outdated: null, audit: null, update: null };

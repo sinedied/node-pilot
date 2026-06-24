@@ -46,7 +46,11 @@ inspiration: [coffilot](https://github.com/jdubois/coffilot). Full design in
   touches the extension's own `src/` or `public/`. It exists to **dogfood**
   Cockpit's own Dev lane (`npm run dev` → Astro detected → `localhost:4321`
   preview) and web Build (`npm run docs:build`). Edit docs content under
-  `docs/site/src/content/docs/`.
+  `docs/site/src/content/docs/`. **astro is pinned to 6.x**: `@astrojs/starlight`
+  has no astro-7-compatible release yet (its peer wants `astro ^6.4.5`), and astro 7
+  silently breaks `npm run dev` (nested astro-6 `@astrojs/mdx` can't resolve
+  `@astrojs/markdown-remark`) even though `astro build` passes. Revisit when Starlight
+  ships astro 7 support.
 - `.github/extensions/cockpit/extension.mjs` — dog-food wrapper that imports the
   root `extension.mjs` so the repo runs the extension against itself.
 - `.github/workflows/ci.yml` — CI (`biome ci .` → build → smoke → test) on Node 22.18 & 24.
