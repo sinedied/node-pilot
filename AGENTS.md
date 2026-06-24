@@ -127,8 +127,9 @@ inspiration: [coffilot](https://github.com/jdubois/coffilot). Full design in
   changing the origin and wiping `localStorage`. See `src/settings.ts`. The schema
   carries `theme`, `pinnedTasks`, plus the tab/auto-run prefs: `tabOrder` (string[] of
   tab ids, or `null` → materialized to the default order), `hiddenTabs` (string[]), and
-  `autoLint`/`autoTest`/`autoDeps` (booleans, **default ON** — only an explicit
-  persisted `false` disables them). `migrate()`/`saveSettings()` sanitize
+  `autoProblems`/`autoTest`/`autoDeps` (booleans, **default ON** — only an explicit
+  persisted `false` disables them; `autoProblems` was formerly `autoLint`, migrated
+  by `migrate()` honoring the legacy key). `migrate()`/`saveSettings()` sanitize
   ids against `KNOWN_TABS` and coerce booleans; the client fetches them via
   `GET /api/settings` (not in `getState()`) and persists patches via `POST /api/settings`.
   `applyTabLayout()` in `app.js` reorders `#tabs` buttons and `.tab-hidden`-toggles
@@ -141,12 +142,19 @@ inspiration: [coffilot](https://github.com/jdubois/coffilot). Full design in
   controller fs-watches the json outputFile (vitest/jest) or debounce-reparses the TAP
   buffer (node) on each run and emits `test:report` + `test:watch`. A one-shot `runTests`
   is guarded off while watch is active; `extension.ts onClose` tears the watch down.
-- **Auto-run on load**: when `autoLint`/`autoTest`/`autoDeps` are on, the controller runs
-  those lanes **once per project path** (`_autoRanFor` set, keyed by cwd so a shared
+- **Auto-run on load**: when `autoProblems`/`autoTest`/`autoDeps` are on, the controller
+  primes those tabs **once per project path** (`_autoRanFor` set, keyed by cwd so a shared
   process can serve several projects) after the first project detection, only for
-  available lanes (`runAutoTasks()` in `controller.ts`). It sets `_autoRunning` so the
+  available tools (`runAutoTasks()` in `controller.ts`). `autoProblems` primes the
+  **Problems** tab via the live-diagnostics path — `getLintDiagnostics()` + `getDiagnostics()`
+  (NOT the lint *lane*) — so `this.lint`/`this.tsLs` populate the boot snapshot and broadcast,
+  making the Problems pill show on load/after reload. It sets `_autoRunning` so the
   `lane:start` events carry `auto: true`; the client then populates results/badges
   **without** switching the active tab (explicit user runs still switch).
+- **Lint is a Problems-tab concept**: clicking the **Lint** task (dropdown row or pinned
+  button) focuses/refreshes the **Problems** tab (`runTask()` → `showTab("problems")`),
+  it does NOT run the lint lane into the Console. The lint *lane* (`/api/lane {id:"lint"}`,
+  in `CONSOLE_LANES`) is kept for back-compat (agent action).
 - **Lane availability**: each `resolve*()` in `lanes.ts` reports `{unavailable}`;
   `laneAvailability(d)` aggregates it onto `detection.availability` so the UI hides
   lanes/tabs that don't apply.

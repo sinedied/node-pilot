@@ -43,13 +43,22 @@ describe("settings migration", () => {
 
   it("defaults the on-load auto-runs ON, but respects an explicit false", () => {
     const fresh = migrate(undefined);
-    expect(fresh.autoLint).toBe(true);
+    expect(fresh.autoProblems).toBe(true);
     expect(fresh.autoTest).toBe(true);
     expect(fresh.autoDeps).toBe(true);
-    const off = migrate({ autoLint: false, autoTest: false, autoDeps: false } as never);
-    expect(off.autoLint).toBe(false);
+    const off = migrate({ autoProblems: false, autoTest: false, autoDeps: false } as never);
+    expect(off.autoProblems).toBe(false);
     expect(off.autoTest).toBe(false);
     expect(off.autoDeps).toBe(false);
+  });
+
+  it("migrates the legacy `autoLint` key into `autoProblems`", () => {
+    // Legacy disabled-lint settings should keep the Problems analysis off.
+    expect(migrate({ autoLint: false } as never).autoProblems).toBe(false);
+    // Legacy enabled (or absent) maps to the default-on behavior.
+    expect(migrate({ autoLint: true } as never).autoProblems).toBe(true);
+    // The new key wins when both are present.
+    expect(migrate({ autoLint: true, autoProblems: false } as never).autoProblems).toBe(false);
   });
 });
 

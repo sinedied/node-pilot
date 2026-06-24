@@ -19,7 +19,7 @@ const state = {
     pinnedTasks: [],
     tabOrder: null,
     hiddenTabs: [],
-    autoLint: false,
+    autoProblems: false,
     autoTest: false,
     autoDeps: false,
   },
@@ -642,11 +642,13 @@ function taskAvailable(t) {
   return (state.detection?.scriptNames || []).includes(t.name);
 }
 
-// Dispatch a task: the `test` lane has its own endpoint/report; other lanes go
-// through /api/lane; scripts through /api/script.
+// Dispatch a task: the `test` lane has its own endpoint/report; the `lint` lane
+// lives in the Problems tab (focus + refresh diagnostics there, not the console);
+// other lanes go through /api/lane; scripts through /api/script.
 function runTask(t) {
   if (t.type === "lane") {
     if (t.id === "test") return api("/api/test", {});
+    if (t.id === "lint") return showTab("problems");
     return api("/api/lane", { id: t.id });
   }
   return api("/api/script", { name: t.name });
@@ -1484,7 +1486,7 @@ function applySettings(s) {
     pinnedTasks: s.pinnedTasks || [],
     tabOrder: Array.isArray(s.tabOrder) ? s.tabOrder : null,
     hiddenTabs: Array.isArray(s.hiddenTabs) ? s.hiddenTabs : [],
-    autoLint: !!s.autoLint,
+    autoProblems: !!s.autoProblems,
     autoTest: !!s.autoTest,
     autoDeps: !!s.autoDeps,
   };
@@ -2069,8 +2071,8 @@ $("#settings-toggle").addEventListener("click", () => {
 // the On-load auto-run checkboxes from current settings.
 function renderSettingsPanel() {
   applyTheme(state.settings.theme);
-  const al = $("#set-autolint");
-  if (al) al.checked = !!state.settings.autoLint;
+  const al = $("#set-autoproblems");
+  if (al) al.checked = !!state.settings.autoProblems;
   const at = $("#set-autotest");
   if (at) at.checked = !!state.settings.autoTest;
   const ad = $("#set-autodeps");
@@ -2142,8 +2144,8 @@ async function commitTabOrder(list) {
   await persistSettings({ tabOrder: order });
 }
 
-$("#set-autolint").addEventListener("change", (e) =>
-  persistSettings({ autoLint: e.currentTarget.checked }),
+$("#set-autoproblems").addEventListener("change", (e) =>
+  persistSettings({ autoProblems: e.currentTarget.checked }),
 );
 $("#set-autotest").addEventListener("change", (e) =>
   persistSettings({ autoTest: e.currentTarget.checked }),

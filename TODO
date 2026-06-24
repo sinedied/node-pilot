@@ -29,12 +29,14 @@ Instead of pills, extract proper information about the project. Suggest useful i
   * order same as package.json
 
 - [ ] bug auto load?
+- [ ] clicking lint button in task list should focus the run/focus the problems tab, not the console tab
 
-- [ ] depdencies: 
-  * link to changelog
-  * scope: default (default or custom => check which ones)
+- [ ] dependencies: 
+  * add link to changelog
+  * scope: default or custom => manuallt check which ones to update. Default follows the package.json rules
   * audit should return more info, like which packages are vulnerable and if they have a fix available, and link to the advisories. 
-  * Update with Copilot
+  * remove the check outdated/audit buttons, should be a single refresh button for consistency with the other tabs. 
+  * Safe update should become "update with Copilot" button, following the scope option selected. The behavior is to send the prompt for which packages to update and still runs all possible checks (lint, test, audit) after the update. If any of these checks fail, the update is reverted and a message is reported to the user (through Copilot) that the update failed and why. 
 
 - [ ] debugger? + usuable by agent
 

@@ -281,7 +281,7 @@ export class Controller {
       pinnedTasks,
       tabOrder: s.tabOrder ?? [...KNOWN_TABS],
       hiddenTabs: s.hiddenTabs,
-      autoLint: s.autoLint,
+      autoProblems: s.autoProblems,
       autoTest: s.autoTest,
       autoDeps: s.autoDeps,
     };
@@ -293,7 +293,7 @@ export class Controller {
     if (Array.isArray(patch.pinnedTasks)) clean.pinnedTasks = patch.pinnedTasks;
     if (Array.isArray(patch.tabOrder)) clean.tabOrder = patch.tabOrder;
     if (Array.isArray(patch.hiddenTabs)) clean.hiddenTabs = patch.hiddenTabs;
-    if (typeof patch.autoLint === "boolean") clean.autoLint = patch.autoLint;
+    if (typeof patch.autoProblems === "boolean") clean.autoProblems = patch.autoProblems;
     if (typeof patch.autoTest === "boolean") clean.autoTest = patch.autoTest;
     if (typeof patch.autoDeps === "boolean") clean.autoDeps = patch.autoDeps;
     const s = await saveSettings(this.cwd, clean);
@@ -303,7 +303,7 @@ export class Controller {
       pinnedTasks,
       tabOrder: s.tabOrder ?? [...KNOWN_TABS],
       hiddenTabs: s.hiddenTabs,
-      autoLint: s.autoLint,
+      autoProblems: s.autoProblems,
       autoTest: s.autoTest,
       autoDeps: s.autoDeps,
     };
@@ -667,7 +667,13 @@ export class Controller {
     const a = d.availability;
     this._autoRunning = true;
     try {
-      if (s.autoLint && a?.lint !== false) await this.runLane("lint").catch(() => {});
+      // Prime the Problems tab (live lint + TS diagnostics) so its pill populates
+      // on load — this fills this.lint/this.tsLs (carried in the boot snapshot)
+      // and broadcasts lint:/ts: diagnostics to connected clients.
+      if (s.autoProblems) {
+        if (a?.lint !== false) await this.getLintDiagnostics().catch(() => {});
+        if (a?.diagnostics !== false) await this.getDiagnostics().catch(() => {});
+      }
       if (s.autoTest && a?.test !== false) await this.runTests().catch(() => {});
       if (s.autoDeps) {
         await this.listOutdated().catch(() => {});

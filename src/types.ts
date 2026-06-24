@@ -309,11 +309,13 @@ export interface Settings {
   // the extension loads.
   tabOrder: string[] | null;
   hiddenTabs: string[];
-  autoLint: boolean;
+  // Analyze the Problems tab (lint + TS diagnostics) on load.
+  autoProblems: boolean;
   autoTest: boolean;
   autoDeps: boolean;
-  // Legacy field kept only so older settings.json files can be migrated.
+  // Legacy fields kept only so older settings.json files can be migrated.
   pinnedScripts?: string[] | null;
+  autoLint?: boolean;
 }
 
 export interface ResolvedSettings {
@@ -321,7 +323,7 @@ export interface ResolvedSettings {
   theme: string;
   tabOrder: string[];
   hiddenTabs: string[];
-  autoLint: boolean;
+  autoProblems: boolean;
   autoTest: boolean;
   autoDeps: boolean;
 }
@@ -331,7 +333,7 @@ export interface SettingsPatch {
   theme?: string;
   tabOrder?: string[];
   hiddenTabs?: string[];
-  autoLint?: boolean;
+  autoProblems?: boolean;
   autoTest?: boolean;
   autoDeps?: boolean;
 }

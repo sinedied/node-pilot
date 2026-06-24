@@ -20,7 +20,7 @@ const DEFAULTS: Settings = {
   theme: "auto",
   tabOrder: null,
   hiddenTabs: [],
-  autoLint: true,
+  autoProblems: true,
   autoTest: true,
   autoDeps: true,
 };
@@ -70,8 +70,9 @@ export function migrate(raw: Partial<Settings> | undefined): Settings {
     tabOrder: tabOrder?.length ? tabOrder : null,
     hiddenTabs: sanitizeTabs(raw?.hiddenTabs),
     // The on-load auto-runs default ON; only an explicit persisted `false`
-    // disables them (so a brand-new project pre-populates its tabs).
-    autoLint: raw?.autoLint !== false,
+    // disables them (so a brand-new project pre-populates its tabs). `autoProblems`
+    // was formerly `autoLint` — honor the legacy key when the new one is absent.
+    autoProblems: (raw?.autoProblems ?? raw?.autoLint) !== false,
     autoTest: raw?.autoTest !== false,
     autoDeps: raw?.autoDeps !== false,
   };
@@ -130,16 +131,16 @@ async function doSaveSettings(projectKey: string, patch: SettingsPatch): Promise
     next.tabOrder = order.length ? order : null;
   }
   if (Array.isArray(patch.hiddenTabs)) next.hiddenTabs = sanitizeTabs(patch.hiddenTabs);
-  if (typeof patch.autoLint === "boolean") next.autoLint = patch.autoLint;
+  if (typeof patch.autoProblems === "boolean") next.autoProblems = patch.autoProblems;
   if (typeof patch.autoTest === "boolean") next.autoTest = patch.autoTest;
   if (typeof patch.autoDeps === "boolean") next.autoDeps = patch.autoDeps;
-  // Persist the new schema only; drop the legacy `pinnedScripts` key.
+  // Persist the new schema only; drop the legacy `pinnedScripts`/`autoLint` keys.
   all[projectKey] = {
     pinnedTasks: next.pinnedTasks,
     theme: next.theme,
     tabOrder: next.tabOrder,
     hiddenTabs: next.hiddenTabs,
-    autoLint: next.autoLint,
+    autoProblems: next.autoProblems,
     autoTest: next.autoTest,
     autoDeps: next.autoDeps,
   };
