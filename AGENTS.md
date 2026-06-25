@@ -28,6 +28,8 @@ inspiration: [coffilot](https://github.com/jdubois/coffilot). Full design in
     `fix.ts` (prompt builders), `settings.ts` (per-project pinned tasks + theme),
     `cdp.ts` (zero-dep Chrome DevTools Protocol client) + `debug.ts` (`DebugSession`:
     the agent-facing Node.js debugger — launch/attach, breakpoints, stepping, inspect),
+    `projects.ts` (`enumerateProjects(root)` — monorepo / multi-root discovery powering
+    the header project selector, see gotcha below),
     `rayfin.ts` (Microsoft Rayfin BaaS dashboard: detection + offline read of
     `rayfin/` files — rayfin.yml / .deployments.json / .env / dab-config.json /
     schema.ts — + allow-listed `rayfin` CLI lanes; **no agent actions**, see below).
@@ -75,13 +77,37 @@ inspiration: [coffilot](https://github.com/jdubois/coffilot). Full design in
 
 ## Critical gotchas
 
-- **Working directory**: the extension process `cwd` is NOT the project root
-  (`~/.copilot`). The project path comes from `ctx.session.workingDirectory` on every
-  canvas `open`/action. `Controller.ensureProjectDir(dir)` anchors + re-detects; all
-  action handlers are wrapped to call it first. Never rely on `process.cwd()` for the
-  project.
-- **No `console.log`** in the extension — stdout is reserved for JSON-RPC. Use
-  `session.log()` (host-side) or `controller.broadcast`/SSE for UI.
+- **Working directory & the root/active split**: the extension process `cwd` is NOT
+  the project root (`~/.copilot`). The host session path comes from
+  `ctx.session.workingDirectory` on every canvas `open`/action. The controller tracks
+  **two** paths: `root` (the host session dir) and `cwd` (the **active project**, which
+  may be a monorepo member the user focused). `Controller.ensureProjectDir(dir)` anchors
+  + re-detects and is called first by every wrapped action handler; it re-roots only on a
+  genuine host-dir change, and on first init (or a root change) restores the **persisted
+  focus** for that root (`settings.activeProject`, defaults to the root). Never rely on
+  `process.cwd()` for the project.
+- **Monorepo / multi-project selector**: `src/projects.ts` `enumerateProjects(root)`
+  discovers selectable projects under the session root: npm/yarn `workspaces` globs +
+  `pnpm-workspace.yaml` `packages:` globs (each resolved member must contain a
+  `package.json`), **plus** a bounded depth-2 scan for other standalone `package.json`
+  dirs (excluding `node_modules`/`dist`/`build`/`coverage`/`.next`/`.astro`/fixtures/
+  examples/etc.), de-duped. The root is always selectable (group = root pkg name);
+  members group under the root header; standalone scanned dirs group under
+  "Other projects". The header **project selector** (`#project-wrap`, left-most in the
+  toolbar with a `.sep` divider) is **conditional** — shown only when `multi` (≥2
+  projects), mirroring the Rayfin/Preview gating. Selecting a project calls
+  `controller.setActiveProject(dir)`: it validates `dir` against the enumerated list
+  (rejects arbitrary paths), stops the previous project's cwd-bound subsystems
+  (dev/test-watch/tsserver/debug), `resetProjectState()`, repoints `cwd`, persists the
+  choice under the **root**'s settings (`activeProject`), re-`init()`s, then broadcasts a
+  full `snapshot`. Routes: `GET /api/projects` (→ `ProjectsState { root, active, multi,
+  projects }`, fetched on client boot), `POST /api/projects/select { dir }`; ongoing
+  updates ride the `projects` SSE event. `get_status` carries a read-only `projects`
+  block (active + list) so the agent knows the focus; there is **no agent action to
+  switch** (human-facing only, like Rayfin). **Deps caveat**: install/audit/outdated
+  conventionally run at the workspace root (single root lockfile); focusing a member runs
+  deps ops in that member dir via the uniform chdir model — root focus gives canonical
+  deps behavior.
 - SDK import only resolves inside the Copilot runtime; keep `src/` SDK-free (only
   `src/extension.ts` imports the SDK shim).
 - Canvas action names must NOT start with `canvas.`.

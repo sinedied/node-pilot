@@ -888,6 +888,85 @@ body {
   min-width: min(220px, calc(100vw - 16px));
 }
 
+/* ---- Project selector (monorepo / multi-root) ---- */
+/* Left-most control; unlike .menu-wrap it has no margin-left:auto so it stays
+   pinned to the start of the toolbar, ahead of the pinned tasks. */
+.project-wrap {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.project-wrap.hidden {
+  display: none !important;
+}
+
+#project-toggle {
+  max-width: 200px;
+}
+
+.project-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 140px;
+}
+
+/* The selector sits at the left edge, so its menu drops down-right. */
+#project-menu {
+  left: 0;
+  right: auto;
+  max-width: calc(100vw - 16px);
+  min-width: min(240px, calc(100vw - 16px));
+}
+
+.menu-group-header {
+  font-size: 11px;
+  color: var(--dim);
+  font-weight: var(--font-weight-semibold, 600);
+  padding: 6px 8px 4px;
+}
+
+.menu-group-header:not(:first-child) {
+  margin-top: 4px;
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+
+.project-item .check {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  opacity: 0;
+  color: var(--accent);
+}
+
+.project-item.active .check {
+  opacity: 1;
+}
+
+.project-item-label {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.project-item-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-item-rel {
+  color: var(--dim);
+  font-family: var(--mono);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 main {
   flex: 1;
   min-height: 0;

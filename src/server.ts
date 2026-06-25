@@ -135,6 +135,14 @@ async function handleApi(
       return sendJson(res, 200, await controller.setSettings(body));
     case "POST /api/refresh":
       return sendJson(res, 200, await controller.refresh());
+    case "GET /api/projects":
+      return sendJson(res, 200, await controller.getProjects());
+    case "POST /api/projects/select": {
+      const result = await controller.setActiveProject(
+        typeof body.dir === "string" ? body.dir : undefined,
+      );
+      return sendJson(res, result.ok ? 200 : 400, result);
+    }
     case "POST /api/info/stats":
       return sendJson(res, 200, await controller.getProjectStats());
     case "POST /api/diagnostics":

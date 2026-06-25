@@ -38,6 +38,7 @@ import {
 import { loadSettings, saveSettings, KNOWN_TABS } from "./settings.ts";
 import { computeStats } from "./info.ts";
 import { readRayfinState, validateRayfinArgs, rayfinArgv } from "./rayfin.ts";
+import { enumerateProjects } from "./projects.ts";
 import * as deps from "./deps.ts";
 import type { SafeUpdateOptions, SafeUpdateResult } from "./deps.ts";
 import type { TestOptions } from "./lanes.ts";
@@ -54,6 +55,8 @@ import type {
   ProjectStats,
   ResolvedSettings,
   RayfinState,
+  ProjectInfo,
+  ProjectsState,
   SettingsPatch,
   TestReport,
   TsLsState,
@@ -122,6 +125,9 @@ interface TestWatchSession {
 
 export class Controller {
   cwd: string;
+  // The host-provided session working directory. `cwd` (the active project) may
+  // be a sub-project of this root in a monorepo / multi-root workspace.
+  root: string;
   sendToChat: (prompt: string) => Promise<void> | void;
   sendImageToChat: (prompt: string, dataBase64: string, mimeType: string) => Promise<void> | void;
   autoRun: boolean;
@@ -136,6 +142,7 @@ export class Controller {
   projectStats: ProjectStats | null;
   _statsPromise: Promise<ProjectStats> | null;
   _rayfin: RayfinState | null;
+  _projects: ProjectInfo[] | null;
   tsLs: TsLsState;
   lint: LintState;
   _tsClient: TsServerClient | null;
@@ -153,6 +160,7 @@ export class Controller {
 
   constructor(cwd: string, { sendToChat, sendImageToChat, autoRun }: ControllerOptions = {}) {
     this.cwd = cwd;
+    this.root = cwd;
     this.sendToChat = sendToChat || (async () => {});
     this.sendImageToChat = sendImageToChat || (async () => {});
     this.autoRun = autoRun !== false;
@@ -176,6 +184,7 @@ export class Controller {
     this.projectStats = null;
     this._statsPromise = null;
     this._rayfin = null;
+    this._projects = null;
     this.tsLs = this.freshTsLs();
     this.lint = this.freshLint();
     this._tsClient = null;
@@ -241,6 +250,7 @@ export class Controller {
     this._rayfin = null;
     if (this.detection.hasProject) this.detection.availability = laneAvailability(this.detection);
     this.broadcast({ type: "detection", detection: this.detection });
+    this.broadcast({ type: "projects", projects: await this.getProjects() });
     // Fire the configured on-load tasks once per project path, after the first
     // successful project detection (a shared process can serve several projects).
     if (this.autoRun && !this._autoRanFor.has(this.cwd) && this.detection.hasProject) {
@@ -251,14 +261,28 @@ export class Controller {
   }
 
   // Anchor the controller to the session's real working directory. The extension
-  // process cwd is not the project root, so the host supplies the project path on
+  // process cwd is not the project root, so the host supplies the session path on
   // every canvas open / action via `ctx.session.workingDirectory`.
+  //
+  // We track the host session `root` separately from the active project `cwd`:
+  // in a monorepo the user may have focused a sub-project, and that selection
+  // must survive subsequent open/action calls (which re-pass the same root).
+  // On the first init for a root — or when the host genuinely switches roots — we
+  // restore the persisted focus for that root (default: the root itself).
   async ensureProjectDir(dir?: string): Promise<Detection | null> {
-    if (dir && dir !== this.cwd) {
+    const rootChanged = !!dir && dir !== this.root;
+    if (rootChanged) {
       this.stopTsServer();
-      this.cwd = dir;
-      await this.init();
-    } else if (!this.detection) {
+      this.stopTestWatch().catch(() => {});
+      this.root = dir;
+      this._projects = null;
+    }
+    if (rootChanged || !this.detection) {
+      // Restore a previously-focused project for this root (if it still exists),
+      // otherwise focus the root itself.
+      const saved = (await loadSettings(this.root)).activeProject;
+      const list = await this.listProjectDirs();
+      this.cwd = saved && list.includes(saved) ? saved : this.root;
       await this.init();
     }
     return this.detection;
@@ -268,9 +292,72 @@ export class Controller {
     this.detection = await detect(this.cwd);
     this.invalidateStats();
     this._rayfin = null;
+    this._projects = null;
     if (this.detection.hasProject) this.detection.availability = laneAvailability(this.detection);
     this.broadcast({ type: "detection", detection: this.detection });
+    this.broadcast({ type: "projects", projects: await this.getProjects() });
     return this.detection;
+  }
+
+  // ---- Monorepo / multi-project selection ---------------------------------
+
+  // Discover (and cache) the selectable projects under the current session root.
+  private async listProjects(): Promise<ProjectInfo[]> {
+    if (!this._projects) this._projects = await enumerateProjects(this.root);
+    return this._projects;
+  }
+
+  private async listProjectDirs(): Promise<string[]> {
+    return (await this.listProjects()).map((p) => p.dir);
+  }
+
+  async getProjects(): Promise<ProjectsState> {
+    const projects = await this.listProjects();
+    return {
+      root: this.root,
+      active: this.cwd,
+      multi: projects.length > 1,
+      projects,
+    };
+  }
+
+  // Focus Cockpit on a different project. Validates the target against the
+  // discovered list, tears down the previous project's cwd-bound subsystems,
+  // re-points `cwd`, re-detects, persists the choice per session root, and
+  // re-broadcasts a fresh snapshot + projects so the whole UI re-anchors.
+  async setActiveProject(dir?: string): Promise<{ ok: boolean; reason?: string }> {
+    if (!dir || typeof dir !== "string") return { ok: false, reason: "No project specified." };
+    const list = await this.listProjectDirs();
+    if (!list.includes(dir)) return { ok: false, reason: "Unknown project." };
+    if (dir === this.cwd) return { ok: true };
+    // Stop everything bound to the previous project's directory.
+    await this.stopDev().catch(() => {});
+    await this.stopTestWatch().catch(() => {});
+    this.stopTsServer();
+    await this.debugStop().catch(() => {});
+    // Reset the per-project transient state so stale lanes / reports / deps from
+    // the previous project don't bleed into the newly-focused one.
+    this.resetProjectState();
+    this.cwd = dir;
+    await saveSettings(this.root, { activeProject: dir });
+    await this.init();
+    // A snapshot re-syncs every tab on the client in one shot.
+    this.broadcast({ type: "snapshot", state: this.getState() });
+    return { ok: true };
+  }
+
+  // Clear lanes / test report / deps / dev output / fix context so a project
+  // switch starts from a clean slate (mirrors the constructor's fresh state).
+  private resetProjectState(): void {
+    this.lanes = {};
+    for (const id of ONE_SHOT_LANES) this.lanes[id] = this.freshLane(id);
+    this.lanes.update = this.freshLane("update");
+    this.test = { report: null, watch: false };
+    this.dev = { status: "stopped", url: null, port: null, output: [], pid: null, _handle: null };
+    this.deps = { outdated: null, audit: null, update: null };
+    this.fixContext = {};
+    this.tsLs = this.freshTsLs();
+    this.lint = this.freshLint();
   }
 
   // ---- Lazy project stats (transitive deps + sizes) -----------------------

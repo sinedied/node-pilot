@@ -7,8 +7,17 @@ import path from "node:path";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import type { LaneId, PinnedTask, Settings, SettingsPatch } from "./types.ts";
 
-const DIR = path.join(os.homedir(), ".cockpit");
-const FILE = path.join(DIR, "settings.json");
+const DIR_NAME = ".cockpit";
+const FILE_NAME = "settings.json";
+
+// Resolve the settings paths lazily so a changed HOME (e.g. in tests) is honored
+// rather than being frozen at module load.
+function settingsDir(): string {
+  return path.join(os.homedir(), DIR_NAME);
+}
+function settingsFile(): string {
+  return path.join(settingsDir(), FILE_NAME);
+}
 
 // Canonical tab ids (must match data-tab values in public/index.html). Used to
 // sanitize persisted tabOrder/hiddenTabs so stale/unknown ids can't leak in.
@@ -84,6 +93,7 @@ export function migrate(raw: Partial<Settings> | undefined): Settings {
     autoProblems: (raw?.autoProblems ?? raw?.autoLint) !== false,
     autoTest: raw?.autoTest !== false,
     autoDeps: raw?.autoDeps !== false,
+    activeProject: typeof raw?.activeProject === "string" ? raw.activeProject : null,
   };
   if (raw && "pinnedTasks" in raw) {
     return { pinnedTasks: sanitizeTasks(raw.pinnedTasks), ...extras };
@@ -99,15 +109,15 @@ export function migrate(raw: Partial<Settings> | undefined): Settings {
 
 async function readAll(): Promise<Record<string, Partial<Settings>>> {
   try {
-    return JSON.parse(await readFile(FILE, "utf8")) || {};
+    return JSON.parse(await readFile(settingsFile(), "utf8")) || {};
   } catch {
     return {};
   }
 }
 
 async function writeAll(obj: Record<string, Partial<Settings>>): Promise<void> {
-  await mkdir(DIR, { recursive: true });
-  await writeFile(FILE, JSON.stringify(obj, null, 2));
+  await mkdir(settingsDir(), { recursive: true });
+  await writeFile(settingsFile(), JSON.stringify(obj, null, 2));
 }
 
 export async function loadSettings(projectKey: string): Promise<Settings> {
@@ -143,6 +153,8 @@ async function doSaveSettings(projectKey: string, patch: SettingsPatch): Promise
   if (typeof patch.autoProblems === "boolean") next.autoProblems = patch.autoProblems;
   if (typeof patch.autoTest === "boolean") next.autoTest = patch.autoTest;
   if (typeof patch.autoDeps === "boolean") next.autoDeps = patch.autoDeps;
+  if (typeof patch.activeProject === "string" || patch.activeProject === null)
+    next.activeProject = patch.activeProject;
   // Persist the new schema only; drop the legacy `pinnedScripts`/`autoLint` keys.
   all[projectKey] = {
     pinnedTasks: next.pinnedTasks,
@@ -152,6 +164,7 @@ async function doSaveSettings(projectKey: string, patch: SettingsPatch): Promise
     autoProblems: next.autoProblems,
     autoTest: next.autoTest,
     autoDeps: next.autoDeps,
+    activeProject: next.activeProject,
   };
   await writeAll(all);
   return next;

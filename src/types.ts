@@ -56,6 +56,34 @@ export interface ProjectDetection {
 }
 export type Detection = NoProjectDetection | ProjectDetection;
 
+// ---- Monorepo / multi-project selection -----------------------------------
+
+// A selectable project discovered under the session root: a workspace member, a
+// scanned standalone package, or the root itself.
+export interface ProjectInfo {
+  // Absolute path to the project directory.
+  dir: string;
+  // Path relative to the session root ("." for the root itself).
+  rel: string;
+  // package.json `name` || directory basename.
+  name: string;
+  // Header label this project is grouped under in the selector menu.
+  group: string;
+  // True when this directory declares a workspace (npm/yarn/pnpm) configuration.
+  isWorkspaceRoot: boolean;
+}
+
+// The project selector model (GET /api/projects + the `projects` SSE event).
+export interface ProjectsState {
+  // Absolute session root (the host-provided working directory).
+  root: string;
+  // Absolute path of the currently focused project (= controller.cwd).
+  active: string;
+  // Whether to surface the selector (true when more than one project exists).
+  multi: boolean;
+  projects: ProjectInfo[];
+}
+
 // ---- Rayfin (Microsoft Rayfin BaaS) ---------------------------------------
 
 // Cheap, detection-time facts about a Rayfin project (set in detect()). The full
@@ -493,6 +521,9 @@ export interface Settings {
   autoProblems: boolean;
   autoTest: boolean;
   autoDeps: boolean;
+  // Monorepo focus: absolute dir of the last project the user selected for this
+  // session root. Stored under the root's settings entry, read back on re-open.
+  activeProject?: string | null;
   // Legacy fields kept only so older settings.json files can be migrated.
   pinnedScripts?: string[] | null;
   autoLint?: boolean;
@@ -516,6 +547,7 @@ export interface SettingsPatch {
   autoProblems?: boolean;
   autoTest?: boolean;
   autoDeps?: boolean;
+  activeProject?: string | null;
 }
 
 // ---- Agent actions --------------------------------------------------------

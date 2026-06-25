@@ -47,6 +47,17 @@ function statusSummary(controller: Controller): Record<string, unknown> {
       fabricWorkspaceUrl: dep?.portalUrl ?? null,
     };
   }
+  // Read-only multi-project awareness so the agent knows which project Cockpit is
+  // focused on (and what else exists) in a monorepo / multi-root workspace. The
+  // selector is human-facing; we add no agent action to switch projects.
+  const projects = controller._projects;
+  if (projects && projects.length > 1) {
+    const active = projects.find((p) => p.dir === controller.cwd) ?? null;
+    summary.projects = {
+      active: active ? { name: active.name, path: active.rel } : null,
+      list: projects.map((p) => ({ name: p.name, path: p.rel })),
+    };
+  }
   return summary;
 }
 

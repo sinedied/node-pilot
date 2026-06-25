@@ -60,6 +60,7 @@ const state = {
     reason: null,
   },
   rayfin: null,
+  projects: null,
 };
 
 // Human-readable byte size (base-1000, matching npm/registry conventions).
@@ -351,6 +352,7 @@ function buildTabMoreMenu() {
 function openTabMore() {
   closeScriptsMenu();
   closePinnedMore();
+  closeProjectMenu();
   buildTabMoreMenu();
   const menu = $("#tab-more-menu");
   menu.classList.remove("hidden");
@@ -1036,6 +1038,7 @@ async function togglePin(task, pin) {
 function openScriptsMenu() {
   closeTabMore();
   closePinnedMore();
+  closeProjectMenu();
   renderScriptsMenu();
   const menu = $("#scripts-menu");
   menu.classList.remove("hidden");
@@ -1046,6 +1049,107 @@ function openScriptsMenu() {
 function closeScriptsMenu() {
   $("#scripts-menu").classList.add("hidden");
   $("#scripts-toggle").setAttribute("aria-expanded", "false");
+}
+
+// ---- Project selector (monorepo / multi-root) -----------------------------
+// Shown only when more than one project is discovered under the session root.
+// Picking one re-anchors the whole Cockpit to that directory (server-side).
+
+function renderProjects() {
+  const wrap = $("#project-wrap");
+  const sep = $("#project-sep");
+  const p = state.projects;
+  const show = !!(p && p.multi);
+  wrap.classList.toggle("hidden", !show);
+  sep.classList.toggle("hidden", !show);
+  if (!show) {
+    closeProjectMenu();
+    return;
+  }
+  const active = p.projects.find((x) => x.dir === p.active) || null;
+  $("#project-name").textContent = active ? active.name : "Project";
+  $("#project-toggle").title = active
+    ? `Project: ${active.name} (${active.rel})`
+    : "Switch project";
+}
+
+function renderProjectMenu() {
+  const menu = $("#project-menu");
+  menu.innerHTML = "";
+  const p = state.projects;
+  if (!p || !p.projects.length) {
+    menu.innerHTML = '<div class="menu-empty">No projects found.</div>';
+    return;
+  }
+  let lastGroup = null;
+  for (const proj of p.projects) {
+    if (proj.group !== lastGroup) {
+      lastGroup = proj.group;
+      const header = document.createElement("div");
+      header.className = "menu-group-header";
+      header.textContent = proj.group;
+      menu.append(header);
+    }
+    const isActive = proj.dir === p.active;
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = "more-menu-item project-item" + (isActive ? " active" : "");
+    item.setAttribute("role", "menuitemradio");
+    item.setAttribute("aria-checked", isActive ? "true" : "false");
+    const check = document.createElement("svg");
+    check.setAttribute("class", "oi check");
+    check.innerHTML = '<use href="#oct-check" />';
+    const label = document.createElement("span");
+    label.className = "project-item-label";
+    const name = document.createElement("span");
+    name.className = "project-item-name";
+    name.textContent = proj.name;
+    label.append(name);
+    if (proj.rel && proj.rel !== ".") {
+      const rel = document.createElement("span");
+      rel.className = "project-item-rel";
+      rel.textContent = proj.rel;
+      label.append(rel);
+    }
+    item.append(check, label);
+    item.addEventListener("click", () => selectProject(proj.dir));
+    menu.append(item);
+  }
+}
+
+async function selectProject(dir) {
+  closeProjectMenu();
+  if (state.projects && dir === state.projects.active) return;
+  const res = await api("/api/projects/select", { dir });
+  if (res && res.ok === false) {
+    toast(res.reason || "Could not switch project.");
+  }
+  // The server broadcasts fresh `projects` + `snapshot` events on success, which
+  // re-render the selector and every tab — no optimistic update needed here.
+}
+
+function openProjectMenu() {
+  closeScriptsMenu();
+  closeTabMore();
+  closePinnedMore();
+  renderProjectMenu();
+  const menu = $("#project-menu");
+  menu.classList.remove("hidden");
+  $("#project-toggle").setAttribute("aria-expanded", "true");
+  clampPopover(menu);
+}
+
+function closeProjectMenu() {
+  $("#project-menu").classList.add("hidden");
+  $("#project-toggle").setAttribute("aria-expanded", "false");
+}
+
+async function loadProjects() {
+  const p = await api("/api/projects");
+  if (p && Array.isArray(p.projects)) {
+    state.projects = p;
+    renderProjects();
+  }
 }
 
 // ---- Pinned-tasks overflow (mirrors the tab overflow menu) ----------------
@@ -1110,6 +1214,7 @@ function buildPinnedMoreMenu() {
 function openPinnedMore() {
   closeScriptsMenu();
   closeTabMore();
+  closeProjectMenu();
   buildPinnedMoreMenu();
   const menu = $("#pinned-more-menu");
   menu.classList.remove("hidden");
@@ -2091,6 +2196,10 @@ function applyEvent(e) {
       state.rayfin = e.rayfin;
       renderRayfin();
       break;
+    case "projects":
+      state.projects = e.projects;
+      renderProjects();
+      break;
     case "lane:start": {
       state.lanes[e.lane] = { id: e.lane, label: e.label, status: "running", output: "" };
       if (isConsoleLane(e.lane)) {
@@ -2262,6 +2371,11 @@ $("#scripts-toggle").addEventListener("click", (e) => {
   if ($("#scripts-menu").classList.contains("hidden")) openScriptsMenu();
   else closeScriptsMenu();
 });
+$("#project-toggle").addEventListener("click", (e) => {
+  e.stopPropagation();
+  if ($("#project-menu").classList.contains("hidden")) openProjectMenu();
+  else closeProjectMenu();
+});
 $("#tab-more").addEventListener("click", (e) => {
   e.stopPropagation();
   if ($("#tab-more-menu").classList.contains("hidden")) openTabMore();
@@ -2275,12 +2389,14 @@ $("#pinned-more").addEventListener("click", (e) => {
 document.addEventListener("click", (e) => {
   const target = /** @type {Element | null} */ (e.target);
   if (!target?.closest(".menu-wrap")) closeScriptsMenu();
+  if (!target?.closest("#project-wrap")) closeProjectMenu();
   if (!target?.closest(".tab-more-wrap")) closeTabMore();
   if (!target?.closest(".pinned-more-wrap")) closePinnedMore();
 });
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
     closeScriptsMenu();
+    closeProjectMenu();
     closeTabMore();
     closePinnedMore();
   }
@@ -2874,8 +2990,12 @@ $("#set-autodeps").addEventListener("change", (e) =>
 
 // Apply persisted tab order/visibility before opening the SSE stream so a custom
 // layout doesn't briefly flash in the default order on first paint. connect()
-// still runs even if the settings fetch fails.
-refreshSettings().finally(connect);
+// still runs even if the settings fetch fails. The project list is fetched up
+// front too (init() may have broadcast it before the SSE stream connected).
+refreshSettings().finally(() => {
+  loadProjects();
+  connect();
+});
 
 // Keep the tab bar and toolbar responsive: recompute their overflow menus
 // whenever the panel is resized, plus once on initial layout.
