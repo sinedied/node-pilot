@@ -155,7 +155,7 @@ const DEFAULT_TAB_ORDER = [
 const TAB_META = {
   info: { label: "Info", icon: "oct-info" },
   preview: { label: "Preview", icon: "oct-eye" },
-  rayfin: { label: "Rayfin", icon: "oct-server" },
+  rayfin: { label: "Rayfin", icon: "oct-rayfin" },
   tests: { label: "Tests", icon: "oct-beaker" },
   problems: { label: "Problems", icon: "oct-alert" },
   deps: { label: "Dependencies", icon: "oct-package" },

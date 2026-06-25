@@ -42,6 +42,12 @@ inspiration: [coffilot](https://github.com/jdubois/coffilot). Full design in
   auto-run via a gear-launched **Settings** panel, `#tab-settings`, which is not itself
   a tab in `#tabs`),
   GitHub Primer light/dark theming + inline Octicon sprite (MIT, bundled, no network).
+  The Rayfin tab/header uses a bespoke `oct-rayfin` symbol (user-provided brand glyph: a
+  leaping salmon with an `@`-eye) kept at its native `viewBox="0 0 24 24"` — the only
+  non-16×16 symbol; its two paths are wrapped in a `<g stroke="currentColor"
+  stroke-width="0.9" stroke-linejoin/linecap="round">` so the line-art weight matches the
+  filled Octicons at the 14px tab size. The API-endpoint row keeps `oct-server`
+  (semantically a server, not the brand).
   `public/app.js` stays JS, type-checked via `tsconfig.client.json` (`checkJs`).
   `public/preview-capture.js` is the capture bridge injected into the proxied preview;
   `public/vendor/snapdom.min.js` is the vendored rasterizer it uses (see gotcha below).
