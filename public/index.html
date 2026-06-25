@@ -253,6 +253,9 @@
       <button type="button" data-tab="preview" id="tabbtn-preview">
         <svg class="oi" aria-hidden="true"><use href="#oct-eye" /></svg>Preview
       </button>
+      <button type="button" data-tab="rayfin" id="tabbtn-rayfin" class="hidden">
+        <svg class="oi" aria-hidden="true"><use href="#oct-server" /></svg>Rayfin
+      </button>
       <button type="button" data-tab="tests" id="tabbtn-tests">
         <svg class="oi" aria-hidden="true"><use href="#oct-beaker" /></svg>Tests<span
           id="tests-badge"
@@ -466,6 +469,109 @@
       </div>
 
       <!-- Dependencies -->
+      <!-- Rayfin (Microsoft Rayfin BaaS dashboard) -->
+      <section id="tab-rayfin" class="tab-panel" hidden>
+        <div class="rf-head panel-head">
+          <h2 class="rf-app-title">
+            <svg class="oi" aria-hidden="true"><use href="#oct-server" /></svg>
+            <span id="rf-app-name">Rayfin</span>
+          </h2>
+          <span id="rf-dialect" class="rf-chip muted hidden"></span>
+          <span class="grow"></span>
+          <button type="button"
+            id="rf-refresh"
+            class="icon-btn"
+            title="Refresh Rayfin status"
+            aria-label="Refresh Rayfin status"
+          >
+            <svg class="oi" aria-hidden="true"><use href="#oct-sync" /></svg>
+          </button>
+        </div>
+
+        <!-- Environment / status -->
+        <div class="deps-section">
+          <div class="deps-section-head wrap">
+            <h3 class="deps-section-title">
+              <svg class="oi" aria-hidden="true"><use href="#oct-shield-check" /></svg>Environment
+            </h3>
+            <span id="rf-auth-chip" class="rf-chip"></span>
+            <span id="rf-backend-chip" class="rf-chip"></span>
+            <span class="grow"></span>
+            <button type="button" class="lane-btn" data-rf-cli="login">
+              <svg class="oi" aria-hidden="true"><use href="#oct-copilot" /></svg>Sign in
+            </button>
+            <button type="button" class="lane-btn" data-rf-cli="dev start">
+              <svg class="oi" aria-hidden="true"><use href="#oct-play" /></svg>Start local
+            </button>
+            <button type="button" class="lane-btn" data-rf-cli="dev stop">Stop</button>
+            <button type="button" class="lane-btn" data-rf-cli="dev status">Status</button>
+          </div>
+          <div id="rf-env" class="rf-env"></div>
+        </div>
+
+        <!-- Fabric workspace & deployment -->
+        <div class="deps-section">
+          <div class="deps-section-head wrap">
+            <h3 class="deps-section-title">
+              <svg class="oi" aria-hidden="true"><use href="#oct-rocket" /></svg>Fabric workspace
+            </h3>
+            <span class="grow"></span>
+            <label class="rf-switch-label">
+              <span class="field-label">Active</span>
+              <select id="rf-switch" class="rf-select"></select>
+            </label>
+            <button type="button" class="lane-btn primary" data-rf-cli="up">
+              <svg class="oi" aria-hidden="true"><use href="#oct-rocket" /></svg>Deploy
+            </button>
+            <button type="button" class="lane-btn" data-rf-cli="up status">Status</button>
+          </div>
+          <div id="rf-workspace" class="rf-workspace"></div>
+        </div>
+
+        <!-- Data model -->
+        <div class="deps-section">
+          <div class="deps-section-head wrap">
+            <h3 class="deps-section-title">
+              <svg class="oi" aria-hidden="true"><use href="#oct-versions" /></svg>Data model
+            </h3>
+            <span id="rf-model-count" class="rf-chip muted hidden"></span>
+            <span class="grow"></span>
+            <button type="button" class="lane-btn" data-rf-cli="dev db apply">
+              <svg class="oi" aria-hidden="true"><use href="#oct-sync" /></svg>Apply to local
+            </button>
+            <button type="button" class="lane-btn" data-rf-cli="up db apply">Apply to Fabric</button>
+          </div>
+          <div id="rf-model" class="rf-model"></div>
+        </div>
+
+        <!-- Functions / connectors -->
+        <div class="deps-section">
+          <div class="deps-section-head wrap">
+            <h3 class="deps-section-title">
+              <svg class="oi" aria-hidden="true"><use href="#oct-zap" /></svg>Functions &amp; connectors
+            </h3>
+            <span class="grow"></span>
+            <button type="button" class="lane-btn" data-rf-cli="functions typegen">Typegen</button>
+            <button type="button" class="lane-btn" data-rf-cli="connector list">Connectors</button>
+          </div>
+          <div id="rf-functions" class="rf-functions"></div>
+        </div>
+
+        <!-- Docs & agent setup -->
+        <div class="deps-section">
+          <div class="deps-section-head wrap">
+            <h3 class="deps-section-title">
+              <svg class="oi" aria-hidden="true"><use href="#oct-checklist" /></svg>Docs &amp; agent setup
+            </h3>
+            <span class="grow"></span>
+            <button type="button" class="lane-btn" data-rf-cli="ai-files">
+              <svg class="oi" aria-hidden="true"><use href="#oct-copilot" /></svg>Set up agent files
+            </button>
+          </div>
+          <div id="rf-docs" class="rf-docs"></div>
+        </div>
+      </section>
+
       <section id="tab-deps" class="tab-panel" hidden>
         <!-- Updates -->
         <div class="deps-section updates">

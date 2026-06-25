@@ -59,6 +59,7 @@ const state = {
     lastUpdated: null,
     reason: null,
   },
+  rayfin: null,
 };
 
 // Human-readable byte size (base-1000, matching npm/registry conventions).
@@ -77,7 +78,8 @@ function formatBytes(n) {
 
 let activeConsoleLane = null;
 const CONSOLE_LANES = new Set(["build", "lint", "format", "typecheck", "update"]);
-const isConsoleLane = (id) => CONSOLE_LANES.has(id) || id.startsWith("script:");
+const isConsoleLane = (id) =>
+  CONSOLE_LANES.has(id) || id.startsWith("script:") || id.startsWith("rayfin:");
 
 // ---- Dev browser state ----------------------------------------------------
 // The URL currently loaded in the preview iframe. Distinct from the dev
@@ -139,10 +141,20 @@ const tabBtns = () => $$("#tabs button[data-tab]");
 
 // Default tab order + per-tab metadata (icon + label), shared by the Settings
 // panel and applyTabLayout(). The Dev tab is now "preview".
-const DEFAULT_TAB_ORDER = ["info", "preview", "tests", "problems", "deps", "debugger", "console"];
+const DEFAULT_TAB_ORDER = [
+  "info",
+  "preview",
+  "rayfin",
+  "tests",
+  "problems",
+  "deps",
+  "debugger",
+  "console",
+];
 const TAB_META = {
   info: { label: "Info", icon: "oct-info" },
   preview: { label: "Preview", icon: "oct-eye" },
+  rayfin: { label: "Rayfin", icon: "oct-server" },
   tests: { label: "Tests", icon: "oct-beaker" },
   problems: { label: "Problems", icon: "oct-alert" },
   deps: { label: "Dependencies", icon: "oct-package" },
@@ -194,6 +206,7 @@ function showTab(name) {
   for (const b of tabBtns()) b.classList.toggle("active", b.dataset.tab === name);
   for (const p of $$(".tab-panel")) p.classList.toggle("active", p.id === `tab-${name}`);
   if (name === "problems") requestDiagnostics();
+  if (name === "rayfin") loadRayfin();
   if (name === "debugger" && state.debug.status === "paused" && !dbgVars) refreshDebugVariables();
   recomputeTabOverflow();
 }
@@ -638,6 +651,7 @@ function renderTabs() {
     "hidden",
     hasProject && a.diagnostics === false && a.lint === false,
   );
+  $("#tabbtn-rayfin").classList.toggle("hidden", !(hasProject && state.detection?.rayfin));
   const active = $(".tabs button.active");
   if (active?.classList.contains("hidden")) {
     const first =
@@ -647,6 +661,156 @@ function renderTabs() {
     if (first) showTab(first.dataset.tab);
   }
   recomputeTabOverflow();
+}
+
+// ---- Rayfin (Microsoft Rayfin BaaS dashboard) -----------------------------
+// The Rayfin tab is a human-facing dashboard built from files under `rayfin/`
+// (rayfin.yml, .deployments.json, .env, dab-config.json). CLI buttons run the
+// real `rayfin` CLI as Console lanes; we intentionally expose no agent actions
+// (Rayfin ships its own MCP/CLI/skills the agent already drives).
+
+let rayfinLoading = false;
+
+async function loadRayfin(force = false) {
+  if (!state.detection?.rayfin) return;
+  if (rayfinLoading) return;
+  rayfinLoading = true;
+  try {
+    state.rayfin = await api("/api/rayfin/state", { force });
+  } finally {
+    rayfinLoading = false;
+  }
+  renderRayfin();
+}
+
+function rfLink(label, href, icon = "oct-link-external") {
+  if (!href) return "";
+  return `<a class="rf-link" href="${esc(href)}" target="_blank" rel="noreferrer noopener"
+    ><svg class="oi" aria-hidden="true"><use href="#${icon}" /></svg>${esc(label)}</a>`;
+}
+
+function renderRayfinEntity(e) {
+  const roles = (e.roles || []).map((r) => `<span class="rf-tag">${esc(r)}</span>`).join("");
+  const fields = (e.fields || [])
+    .map((f) => {
+      const type = f.relation ? `${esc(f.relation.kind)} → ${esc(f.relation.target)}` : esc(f.type);
+      const opt = f.optional ? '<span class="rf-opt">?</span>' : "";
+      return `<tr><td class="rf-field-name">${esc(f.name)}${opt}</td><td class="rf-field-type">${type}</td></tr>`;
+    })
+    .join("");
+  const perms = (e.permissions || [])
+    .map(
+      (p) =>
+        `<div class="rf-perm"><span class="rf-tag">${esc(p.role)}</span><span class="rf-perm-actions">${esc(
+          (p.actions || []).join(", "),
+        )}</span></div>`,
+    )
+    .join("");
+  return `<div class="rf-entity">
+    <div class="rf-entity-head">
+      <strong>${esc(e.name)}</strong>
+      ${e.isEntity ? '<span class="rf-tag entity">entity</span>' : '<span class="rf-tag role">role</span>'}
+      ${roles}
+    </div>
+    ${fields ? `<table class="rf-fields">${fields}</table>` : ""}
+    ${perms ? `<div class="rf-perms">${perms}</div>` : ""}
+  </div>`;
+}
+
+function renderRayfin() {
+  const r = state.rayfin;
+  const panel = $("#tab-rayfin");
+  if (!panel) return;
+  if (!r || r.detected === false) {
+    $("#rf-app-name").textContent = "Rayfin";
+    $("#rf-dialect").classList.add("hidden");
+    for (const id of ["#rf-env", "#rf-workspace", "#rf-model", "#rf-functions", "#rf-docs"]) {
+      const el = $(id);
+      if (el) el.innerHTML = '<div class="rf-empty">Loading…</div>';
+    }
+    return;
+  }
+
+  // Header
+  $("#rf-app-name").textContent = r.config?.name || "Rayfin";
+  const dialect = $("#rf-dialect");
+  if (r.config?.dialect) {
+    dialect.textContent = r.config.dialect;
+    dialect.classList.remove("hidden");
+  } else dialect.classList.add("hidden");
+
+  // Environment
+  const auth = $("#rf-auth-chip");
+  auth.textContent = r.auth?.signedIn ? "Signed in" : "Signed out";
+  auth.className = `rf-chip ${r.auth?.signedIn ? "ok" : "muted"}`;
+  $("#rf-backend-chip").classList.add("hidden");
+  const methods = (r.config?.authMethods || []).join(", ") || "—";
+  const hosting = r.config?.staticHosting?.folder;
+  $("#rf-env").innerHTML = `<div class="rf-kv"><span>Auth methods</span><b>${esc(methods)}</b></div>
+    ${hosting ? `<div class="rf-kv"><span>Static hosting</span><b>${esc(hosting)}</b></div>` : ""}`;
+
+  // Fabric workspace & deployment
+  const list = r.deployments?.list || [];
+  const active = list.find((d) => d.active) || null;
+  const sw = $("#rf-switch");
+  sw.innerHTML =
+    list
+      .map(
+        (d) =>
+          `<option value="${esc(d.name)}"${d.active ? " selected" : ""}>${esc(d.name)}</option>`,
+      )
+      .join("") || '<option value="">— none —</option>';
+  sw.disabled = list.length === 0;
+  const ws = $("#rf-workspace");
+  if (!active) {
+    ws.innerHTML =
+      '<div class="rf-empty">No deployments yet. Use <b>Deploy</b> to provision a Fabric workspace.</div>';
+  } else {
+    const when = active.deployedAt ? new Date(active.deployedAt).toLocaleString() : "—";
+    ws.innerHTML = `<div class="rf-card">
+      <div class="rf-card-head"><strong>${esc(active.name)}</strong>
+        <span class="rf-id" title="${esc(active.itemId || "")}">${esc(active.itemId || "")}</span></div>
+      <div class="rf-links">
+        ${rfLink("Open app", active.hostingUrl, "oct-link-external")}
+        ${rfLink("Open Fabric workspace", active.portalUrl, "oct-rocket")}
+        ${rfLink("API endpoint", active.apiUrl, "oct-server")}
+      </div>
+      <div class="rf-kv"><span>Deployed</span><b>${esc(when)}</b></div>
+    </div>`;
+  }
+
+  // Data model
+  const entities = r.entities || [];
+  const count = $("#rf-model-count");
+  if (entities.length) {
+    count.textContent = `${entities.length} ${entities.length === 1 ? "type" : "types"}`;
+    count.classList.remove("hidden");
+  } else count.classList.add("hidden");
+  $("#rf-model").innerHTML = entities.length
+    ? `<div class="rf-entities">${entities.map(renderRayfinEntity).join("")}</div>`
+    : '<div class="rf-empty">No data model found. Define entities in <b>rayfin/data/schema.ts</b>.</div>';
+
+  // Functions & connectors
+  const fns = r.functions || [];
+  const conns = r.connectors || [];
+  const fnHtml = fns.length
+    ? fns.map((f) => `<span class="rf-tag">${esc(f)}</span>`).join("")
+    : '<span class="rf-muted">No functions</span>';
+  const connHtml = conns.length
+    ? conns.map((c) => `<span class="rf-tag">${esc(c)}</span>`).join("")
+    : '<span class="rf-muted">No connectors</span>';
+  $("#rf-functions").innerHTML =
+    `<div class="rf-kv"><span>Functions</span><div class="rf-tags">${fnHtml}</div></div>
+    <div class="rf-kv"><span>Connectors</span><div class="rf-tags">${connHtml}</div></div>`;
+
+  // Docs & agent setup
+  const agentMsg = r.hasAgentFiles
+    ? '<span class="rf-chip ok">Agent files present</span>'
+    : '<span class="rf-chip muted">Agent files not set up</span>';
+  $("#rf-docs").innerHTML = `<div class="rf-links">
+      ${rfLink("Rayfin docs", r.docsUrl || "https://github.com/microsoft/rayfin", "oct-checklist")}
+    </div>
+    <div class="rf-kv"><span>Agent setup</span><div>${agentMsg}</div></div>`;
 }
 
 // ---- Tasks (unified pinned lanes + scripts) -------------------------------
@@ -1899,8 +2063,14 @@ function applyEvent(e) {
     case "detection":
       state.detection = e.detection;
       state.stats = null;
+      state.rayfin = null;
       renderProject();
       refreshSettings();
+      if (e.detection?.rayfin && $("#tabbtn-rayfin")?.classList.contains("active")) loadRayfin();
+      break;
+    case "rayfin:state":
+      state.rayfin = e.rayfin;
+      renderRayfin();
       break;
     case "lane:start": {
       state.lanes[e.lane] = { id: e.lane, label: e.label, status: "running", output: "" };
@@ -2532,6 +2702,35 @@ $("#deps-audit-fix").addEventListener("click", async (e) => {
   } finally {
     setDepsBusy(btn, false);
   }
+});
+
+// ---- Rayfin wiring --------------------------------------------------------
+
+$("#rf-refresh").addEventListener("click", async (e) => {
+  const btn = e.currentTarget;
+  setDepsBusy(btn, true);
+  try {
+    await loadRayfin(true);
+  } finally {
+    setDepsBusy(btn, false);
+  }
+});
+
+// Delegated handler for every CLI button (data-rf-cli="dev start"). Streams to
+// the Console tab via the rayfin:<cmd> lane.
+$("#tab-rayfin").addEventListener("click", async (e) => {
+  const btn = e.target.closest("[data-rf-cli]");
+  if (!btn) return;
+  const args = btn.dataset.rfCli.split(/\s+/).filter(Boolean);
+  if (!args.length) return;
+  const r = await api("/api/rayfin/cli", { args });
+  if (r && r.started === false && r.reason) toast(r.reason);
+});
+
+$("#rf-switch").addEventListener("change", async (e) => {
+  const name = e.currentTarget.value;
+  if (!name) return;
+  await api("/api/rayfin/switch", { name });
 });
 
 // ---- Settings panel -------------------------------------------------------

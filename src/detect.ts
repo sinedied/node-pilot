@@ -3,6 +3,7 @@
 // project files, with no questions asked.
 import path from "node:path";
 import { readJson, readText, firstExisting, existsSyncSafe } from "./util.ts";
+import { detectRayfin } from "./rayfin.ts";
 import type { Detection, Framework, PackageManager } from "./types.ts";
 
 interface PackageJson {
@@ -151,6 +152,7 @@ export async function detect(cwd: string): Promise<Detection> {
   const workspaces = await detectWorkspaces(cwd, pkg);
   const playwright = Boolean(deps["@playwright/test"]);
   const nvmrc = (await readText(path.join(cwd, ".nvmrc")))?.trim() || null;
+  const rayfin = await detectRayfin(cwd, deps);
 
   return {
     hasProject: true,
@@ -177,5 +179,6 @@ export async function detect(cwd: string): Promise<Detection> {
     description: typeof pkg.description === "string" ? pkg.description : null,
     dependencyCount: Object.keys(pkg.dependencies || {}).length,
     devDependencyCount: Object.keys(pkg.devDependencies || {}).length,
+    rayfin,
   };
 }

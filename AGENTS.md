@@ -27,11 +27,16 @@ inspiration: [coffilot](https://github.com/jdubois/coffilot). Full design in
     events), `server.ts` (http + SSE + `/api/*`), `actions.ts` (agent actions),
     `fix.ts` (prompt builders), `settings.ts` (per-project pinned tasks + theme),
     `cdp.ts` (zero-dep Chrome DevTools Protocol client) + `debug.ts` (`DebugSession`:
-    the agent-facing Node.js debugger — launch/attach, breakpoints, stepping, inspect).
+    the agent-facing Node.js debugger — launch/attach, breakpoints, stepping, inspect),
+    `rayfin.ts` (Microsoft Rayfin BaaS dashboard: detection + offline read of
+    `rayfin/` files — rayfin.yml / .deployments.json / .env / dab-config.json /
+    schema.ts — + allow-listed `rayfin` CLI lanes; **no agent actions**, see below).
 - `types/copilot-sdk.d.ts` — ambient shim for `@github/copilot-sdk/extension` so `tsc`
   resolves it in CI (the real package only exists inside the Copilot app).
-- `public/` — vanilla HTML/CSS/JS UI (Info / Preview / Tests / Problems / Dependencies /
-  Debugger / Console tabs — that's the **default order**; users reorder/hide tabs and toggle
+- `public/` — vanilla HTML/CSS/JS UI (Info / Preview / Rayfin / Tests / Problems /
+  Dependencies / Debugger / Console tabs — that's the **default order**; Rayfin is
+  **conditional**, shown only when a Rayfin project is detected, like Preview/Tests/Problems;
+  users reorder/hide tabs and toggle
   auto-run via a gear-launched **Settings** panel, `#tab-settings`, which is not itself
   a tab in `#tabs`),
   GitHub Primer light/dark theming + inline Octicon sprite (MIT, bundled, no network).
@@ -55,6 +60,17 @@ inspiration: [coffilot](https://github.com/jdubois/coffilot). Full design in
   ships astro 7 support.
 - `.github/extensions/cockpit/extension.mjs` — dog-food wrapper that imports the
   root `extension.mjs` so the repo runs the extension against itself.
+- `e2e/` — **permanent dogfood fixtures**, its own npm **workspace root**
+  (`package.json` with `workspaces:["*"]`, name `cockpit-e2e`) kept **out** of
+  Cockpit's own install/lockfile so fixture deps never pollute Cockpit's
+  Dependencies/Audit tab. `e2e/rayfin-app/` is a mock Microsoft Rayfin project
+  (rayfin.yml + `@microsoft/rayfin*` deps + mock `rayfin/.deployments.json` / `.env` /
+  `dab-config.json` / `data/schema.ts` / `functions/`) so the **Rayfin tab renders
+  fully offline** (no Docker/Fabric/login/install). Excluded from Biome via `"!e2e"`
+  in `biome.json`; tsconfig/vitest/smoke already scope to `src`/`public`/`test`.
+  Dogfood by opening a Cockpit session at `e2e/rayfin-app/` (→ Rayfin tab) or at
+  `e2e/` (→ monorepo detection signal). Mock dotfiles contain **only fabricated**
+  values — never real secrets.
 - `.github/workflows/ci.yml` — CI (`biome ci .` → build → smoke → test) on Node 22.18 & 24.
 
 ## Critical gotchas
@@ -264,6 +280,22 @@ inspiration: [coffilot](https://github.com/jdubois/coffilot). Full design in
     *unless* a user breakpoint resolved to the entry line. Resume/step clear `paused` synchronously so a
     follow-up evaluate can't reuse stale call-frame ids. A monotonic `gen` token guards against a slow,
     superseded `start()` tearing down a newer session. Browser debugging is **Phase 2** (deferred).
+- **Rayfin tab = human-facing dashboard, deliberately NOT an agent surface** (`rayfin.ts`,
+  `#tab-rayfin`): the opposite stance to the Debugger. Microsoft Rayfin ships its own MCP
+  (`@microsoft/rayfin-mcp`) + CLI + agent skills, so duplicating `rayfin` commands as
+  `rayfin_*` agent actions would be redundant. Instead the tab reads `rayfin/` files
+  offline (`readRayfinState`: rayfin.yml → config, `.deployments.json` → Fabric workspace +
+  Open-app/Open-Fabric links + switcher, `dab-config.json`/`schema.ts` → data-model viewer,
+  `.env` → public vars, `functions/` + connectors) and its buttons run **allow-listed**
+  `rayfin` CLI commands as Console **lanes** (`rayfin:<cmd>`, via `npm exec -- rayfin …`),
+  streamed like build/lint. `validateRayfinArgs` gates the allow-list (`SAFE_ARG` regex +
+  `ALLOWED` verbs). The **only** agent touchpoint is a read-only `rayfin` block added to the
+  existing `get_status` (detected? dialect, auth methods, signed-in, active workspace,
+  app/portal URLs) — detection state, not a CLI duplicate. Detection (`detectRayfin`) is
+  cheap (rayfin.yml or `@microsoft/rayfin*` deps → `Detection.rayfin`); the full dashboard
+  is lazy (`/api/rayfin/state`, cached in `controller._rayfin`, invalidated on detect +
+  after every CLI lane). Never surface secrets — only public IDs/URLs from
+  `.deployments.json`/`.env`; auth tokens (`rayfin/.rayfin/auth.json`) are only presence-checked.
 
 ## Workflow
 

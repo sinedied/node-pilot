@@ -1523,6 +1523,201 @@ table.dep-table {
   border-color: var(--green);
 }
 
+/* ---- Rayfin tab ---- */
+#tab-rayfin {
+  overflow-y: auto;
+}
+#tab-rayfin .deps-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-muted);
+}
+#tab-rayfin .deps-section:first-of-type {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+.rf-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.rf-app-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+.rf-app-title .oi {
+  color: var(--dim);
+}
+.rf-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.rf-chip.ok {
+  color: var(--green);
+  border-color: color-mix(in srgb, var(--green) 40%, var(--border));
+}
+.rf-chip.muted {
+  color: var(--dim);
+}
+.rf-empty,
+.rf-muted {
+  color: var(--dim);
+  font-size: 12px;
+}
+.rf-kv {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  padding: 2px 0;
+}
+.rf-kv > span:first-child {
+  color: var(--dim);
+  min-width: 110px;
+}
+.rf-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.rf-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: var(--bg-inset);
+  border: 1px solid var(--border-muted);
+  font-size: 10px;
+  font-family: var(--mono);
+}
+.rf-tag.entity {
+  color: var(--accent);
+}
+.rf-tag.role {
+  color: var(--purple);
+}
+.rf-select {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 3px 6px;
+  font-size: 12px;
+}
+.rf-switch-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.rf-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px;
+  background: var(--bg-elev);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.rf-card-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.rf-id {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rf-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.rf-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--accent);
+  text-decoration: none;
+  font-size: 12px;
+}
+.rf-link:hover {
+  text-decoration: underline;
+}
+.rf-entities {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+}
+.rf-entity {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+  background: var(--bg-elev);
+}
+.rf-entity-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.rf-fields {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+.rf-fields td {
+  padding: 1px 0;
+  vertical-align: top;
+}
+.rf-field-name {
+  font-family: var(--mono);
+  padding-right: 10px !important;
+}
+.rf-field-type {
+  color: var(--dim);
+  font-family: var(--mono);
+  text-align: right;
+}
+.rf-opt {
+  color: var(--yellow);
+}
+.rf-perms {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.rf-perm {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+}
+.rf-perm-actions {
+  color: var(--dim);
+  font-family: var(--mono);
+}
+
 /* ---- Dependencies: Updates + Security sections ---- */
 /* Scroll the whole tab as one column; don't set `display` here or it would
    override `.tab-panel { display: none }` and leak the panel onto other tabs. */

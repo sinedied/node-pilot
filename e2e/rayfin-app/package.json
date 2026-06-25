@@ -1,0 +1,19 @@
+{
+  "name": "rayfin-todo-app",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Cockpit.js dogfood fixture: a minimal Microsoft Rayfin app (todo list) used to exercise the Rayfin tab. Renders offline from committed mock deployment files.",
+  "scripts": {
+    "dev": "rayfin dev",
+    "build": "echo \"static build\"",
+    "deploy": "rayfin up",
+    "test": "echo \"no tests\""
+  },
+  "dependencies": {
+    "@microsoft/rayfin": "^1.33.0"
+  },
+  "devDependencies": {
+    "@microsoft/rayfin-cli": "^1.33.0"
+  }
+}

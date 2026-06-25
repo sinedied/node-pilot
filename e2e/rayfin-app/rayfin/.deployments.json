@@ -1,0 +1,25 @@
+{
+  "active": "prod",
+  "deployments": {
+    "prod": {
+      "itemId": "b1d2c3e4-0000-4a1a-9c2b-1111aaaa2222",
+      "apiUrl": "https://rayfin-todo-app-prod.fabric.microsoft.com/api",
+      "workspaceId": "f0e1d2c3-1111-4b2b-8d3c-2222bbbb3333",
+      "tenantId": "00aa00aa-bb11-cc22-dd33-44ee55ff6677",
+      "publishableKey": "rayfin_pub_prod_5f8a2c1d9e4b",
+      "portalUrl": "https://app.fabric.microsoft.com/groups/f0e1d2c3-1111-4b2b-8d3c-2222bbbb3333",
+      "hostingUrl": "https://rayfin-todo-app-prod.z01.web.fabric.microsoft.com",
+      "deployedAt": "2026-05-14T09:32:00.000Z"
+    },
+    "staging": {
+      "itemId": "c2e3d4f5-0000-4b2b-8d3c-3333cccc4444",
+      "apiUrl": "https://rayfin-todo-app-staging.fabric.microsoft.com/api",
+      "workspaceId": "a9b8c7d6-2222-4c3c-9e4d-3333dddd5555",
+      "tenantId": "00aa00aa-bb11-cc22-dd33-44ee55ff6677",
+      "publishableKey": "rayfin_pub_staging_2b7d4e9a1c6f",
+      "portalUrl": "https://app.fabric.microsoft.com/groups/a9b8c7d6-2222-4c3c-9e4d-3333dddd5555",
+      "hostingUrl": "https://rayfin-todo-app-staging.z01.web.fabric.microsoft.com",
+      "deployedAt": "2026-05-12T16:08:00.000Z"
+    }
+  }
+}

@@ -15,6 +15,7 @@ const FILE = path.join(DIR, "settings.json");
 export const KNOWN_TABS = [
   "info",
   "preview",
+  "rayfin",
   "tests",
   "problems",
   "deps",

@@ -37,6 +37,7 @@ import {
 } from "./debug.ts";
 import { loadSettings, saveSettings, KNOWN_TABS } from "./settings.ts";
 import { computeStats } from "./info.ts";
+import { readRayfinState, validateRayfinArgs, rayfinArgv } from "./rayfin.ts";
 import * as deps from "./deps.ts";
 import type { SafeUpdateOptions, SafeUpdateResult } from "./deps.ts";
 import type { TestOptions } from "./lanes.ts";
@@ -52,6 +53,7 @@ import type {
   ProcessHandle,
   ProjectStats,
   ResolvedSettings,
+  RayfinState,
   SettingsPatch,
   TestReport,
   TsLsState,
@@ -133,6 +135,7 @@ export class Controller {
   fixContext: Record<string, FixContextEntry>;
   projectStats: ProjectStats | null;
   _statsPromise: Promise<ProjectStats> | null;
+  _rayfin: RayfinState | null;
   tsLs: TsLsState;
   lint: LintState;
   _tsClient: TsServerClient | null;
@@ -172,6 +175,7 @@ export class Controller {
     this.fixContext = {}; // lane -> last failure { command, output, exitCode, report }
     this.projectStats = null;
     this._statsPromise = null;
+    this._rayfin = null;
     this.tsLs = this.freshTsLs();
     this.lint = this.freshLint();
     this._tsClient = null;
@@ -234,6 +238,7 @@ export class Controller {
   async init(): Promise<Detection> {
     this.detection = await detect(this.cwd);
     this.invalidateStats();
+    this._rayfin = null;
     if (this.detection.hasProject) this.detection.availability = laneAvailability(this.detection);
     this.broadcast({ type: "detection", detection: this.detection });
     // Fire the configured on-load tasks once per project path, after the first
@@ -262,6 +267,7 @@ export class Controller {
   async refresh(): Promise<Detection> {
     this.detection = await detect(this.cwd);
     this.invalidateStats();
+    this._rayfin = null;
     if (this.detection.hasProject) this.detection.availability = laneAvailability(this.detection);
     this.broadcast({ type: "detection", detection: this.detection });
     return this.detection;
@@ -1285,6 +1291,71 @@ export class Controller {
     await this.sendToChat(prompt);
     this.log(`Asked Copilot to fix ${vulnerabilities.length} vulnerability group(s).`);
     return { ok: true };
+  }
+
+  // ---- Rayfin (Microsoft Rayfin BaaS dashboard) ---------------------------
+
+  // Build (and cache) the read-only Rayfin dashboard model. The cache is cleared
+  // on (re)detection and after every CLI command that can change state.
+  async getRayfinState(force = false): Promise<RayfinState | { detected: false }> {
+    const d = this.detection;
+    if (!d?.hasProject || !d.rayfin) return { detected: false };
+    if (this._rayfin && !force) return this._rayfin;
+    this._rayfin = await readRayfinState(this.cwd);
+    return this._rayfin;
+  }
+
+  // Re-read the dashboard model and broadcast it (e.g. after a deploy / switch).
+  async refreshRayfin(): Promise<void> {
+    const d = this.detection;
+    if (!d?.hasProject || !d.rayfin) {
+      this._rayfin = null;
+      return;
+    }
+    this._rayfin = await readRayfinState(this.cwd);
+    this.broadcast({ type: "rayfin:state", rayfin: this._rayfin });
+  }
+
+  // Run an allow-listed `rayfin` CLI command as a Console lane (rayfin:<cmd>),
+  // streaming output like build/lint. We intentionally do NOT expose these as
+  // agent actions — Rayfin ships its own MCP/CLI/skills the agent already uses.
+  async runRayfinCli(args: unknown): Promise<{ ok: boolean; reason?: string }> {
+    const d = this.detection;
+    if (!d?.hasProject || !d.rayfin) return { ok: false, reason: "Not a Rayfin project." };
+    const valid = validateRayfinArgs(args);
+    if (!valid) return { ok: false, reason: "Unsupported rayfin command." };
+    const id = `rayfin:${valid[0]}`;
+    this.lanes[id] = this.lanes[id] || this.freshLane(id);
+    const lane = this.lanes[id];
+    if (lane.status === "running")
+      return { ok: false, reason: `rayfin ${valid[0]} is already running.` };
+    const argv = rayfinArgv(d.pm, valid);
+    lane.status = "running";
+    lane.label = `rayfin ${valid.join(" ")}`;
+    lane.output = [];
+    lane.startedAt = Date.now();
+    lane.endedAt = null;
+    this.broadcast({ type: "lane:start", lane: id, label: lane.label });
+    const res = await run(argv, {
+      cwd: this.cwd,
+      onData: (chunk) => {
+        pushCapped(lane.output, chunk);
+        this.broadcast({ type: "lane:data", lane: id, chunk });
+      },
+    });
+    lane.exitCode = res.code;
+    lane.endedAt = Date.now();
+    lane.status = res.code === 0 ? "passed" : "failed";
+    this.broadcast({ type: "lane:end", lane: id, exitCode: res.code, status: lane.status });
+    // Any command may change auth / deployments / functions — refresh the model.
+    await this.refreshRayfin().catch(() => {});
+    return { ok: res.code === 0, reason: res.code === 0 ? undefined : `exit ${res.code}` };
+  }
+
+  // Quick workspace switch (rewrites rayfin/.env to the chosen deployment).
+  switchRayfinWorkspace(name: string): Promise<{ ok: boolean; reason?: string }> {
+    if (!name) return Promise.resolve({ ok: false, reason: "No workspace name." });
+    return this.runRayfinCli(["up", "switch", name]);
   }
 
   // ---- Fix with Copilot ---------------------------------------------------

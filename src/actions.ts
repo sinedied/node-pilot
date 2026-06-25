@@ -10,7 +10,7 @@ function statusSummary(controller: Controller): Record<string, unknown> {
   const lanes = Object.fromEntries(
     Object.entries(controller.lanes).map(([id, l]) => [id, l.status]),
   );
-  return {
+  const summary: Record<string, unknown> = {
     hasProject: true,
     name: d.name,
     packageManager: d.pm,
@@ -31,6 +31,23 @@ function statusSummary(controller: Controller): Record<string, unknown> {
         }
       : null,
   };
+  // Read-only Rayfin awareness (detection facts + cached dashboard, when loaded).
+  // The Rayfin tab drives the CLI directly; we deliberately add no rayfin_* agent
+  // actions since Rayfin ships its own MCP/CLI/skills the agent already uses.
+  if (d.rayfin) {
+    const r = controller._rayfin;
+    const dep = r?.deployments.list.find((x) => x.active) ?? null;
+    summary.rayfin = {
+      detected: true,
+      dialect: d.rayfin.dialect,
+      authMethods: d.rayfin.authMethods,
+      signedIn: r?.auth.signedIn ?? null,
+      activeWorkspace: r?.deployments.active ?? null,
+      appUrl: dep?.hostingUrl ?? null,
+      fabricWorkspaceUrl: dep?.portalUrl ?? null,
+    };
+  }
+  return summary;
 }
 
 export function buildActions(controller: Controller): ActionDefinition[] {

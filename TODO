@@ -39,8 +39,9 @@ Instead of pills, extract proper information about the project. Suggest useful i
 - [x] new debugger tab:
   * this debugger tab should be a full-featured debugger, with breakpoints, step over, step into, step out, etc. It should also have a console for evaluating expressions and inspecting variables. The debugger should be able to attach to a running process or start a new process. It should support Node.js and browser debugging.
   * Important: this debugger should be exposed to the agent, so that the agent can use it to debug code. The agent should be able to set breakpoints, step through code, and inspect variables. The agent should also be able to evaluate expressions in the console. This is the most important feature
+- [x] badges disappearing or not when folded under ... tabs
 
-- [ ] badges disappearing or not when folded under ... tabs
+- [ ] monorepo handling and project selector in header
 
 - [ ] Design pass: Fix with copilot button consistency, with a nice gradient border
   * Store design rules, understanding and decisions in AGENTS.md

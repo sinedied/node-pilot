@@ -50,8 +50,96 @@ export interface ProjectDetection {
   dependencyCount: number;
   devDependencyCount: number;
   availability?: LaneAvailability;
+  // Present when the project is a Microsoft Rayfin app (rayfin/rayfin.yml or a
+  // @microsoft/rayfin* dependency). Gates the conditional Rayfin tab.
+  rayfin?: RayfinDetection | null;
 }
 export type Detection = NoProjectDetection | ProjectDetection;
+
+// ---- Rayfin (Microsoft Rayfin BaaS) ---------------------------------------
+
+// Cheap, detection-time facts about a Rayfin project (set in detect()). The full
+// dashboard model (deployments, entities, …) is built lazily by readRayfinState.
+export interface RayfinDetection {
+  // Absolute path to the project's rayfin/ directory.
+  dir: string;
+  // Database dialect from rayfin.yml ("mssql" | "postgresql" | …), when set.
+  dialect: string | null;
+  // Sign-in methods from rayfin.yml (e.g. ["fabric", "password"]).
+  authMethods: string[];
+  hasFunctions: boolean;
+  hasConnectors: boolean;
+}
+
+// A deployed (or configured) Fabric workspace from rayfin/.deployments.json.
+export interface RayfinDeployment {
+  name: string;
+  active: boolean;
+  itemId: string | null;
+  apiUrl: string | null;
+  workspaceId: string | null;
+  tenantId: string | null;
+  // Fabric portal deep link to the workspace.
+  portalUrl: string | null;
+  // Public URL of the deployed app (static hosting).
+  hostingUrl: string | null;
+  deployedAt: string | null;
+}
+
+export interface RayfinRelation {
+  kind: "one" | "many";
+  target: string;
+}
+
+export interface RayfinField {
+  name: string;
+  // Scalar decorator name (text/uuid/int/…) or the related entity for relations.
+  type: string;
+  optional: boolean;
+  relation: RayfinRelation | null;
+}
+
+export interface RayfinPermission {
+  role: string;
+  actions: string[];
+}
+
+export interface RayfinEntity {
+  name: string;
+  // True for @entity classes; false for @role-only classes (e.g. User).
+  isEntity: boolean;
+  roles: string[];
+  fields: RayfinField[];
+  // Role/action permissions from the generated dab-config.json, when present.
+  permissions: RayfinPermission[];
+}
+
+export interface RayfinConfig {
+  name: string | null;
+  dialect: string | null;
+  authMethods: string[];
+  staticHosting: {
+    folder: string | null;
+    indexDocument: string | null;
+    buildCommand: string | null;
+  } | null;
+}
+
+// Full, lazily-built Rayfin dashboard model (POST /api/rayfin/state).
+export interface RayfinState {
+  detected: boolean;
+  config: RayfinConfig | null;
+  auth: { signedIn: boolean };
+  deployments: { active: string | null; list: RayfinDeployment[] };
+  entities: RayfinEntity[];
+  functions: string[];
+  connectors: string[];
+  hasDabConfig: boolean;
+  hasAgentFiles: boolean;
+  paths: { config: string | null; schema: string | null; deployments: string | null };
+  docsUrl: string;
+  at: number;
+}
 
 // ---- Project stats (lazy: transitive deps + sizes) ------------------------
 

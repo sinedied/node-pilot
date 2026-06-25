@@ -10,6 +10,7 @@
     "includes": [
       "**",
       "!node_modules",
+      "!e2e",
       "!coverage",
       "!dist",
       "!docs/site/dist",

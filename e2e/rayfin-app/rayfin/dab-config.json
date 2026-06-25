@@ -1,0 +1,43 @@
+{
+  "$schema": "https://github.com/Azure/data-api-builder/releases/latest/download/dab.draft.schema.json",
+  "data-source": {
+    "database-type": "mssql",
+    "connection-string": "@env('RAYFIN_DAB_CONNECTION_STRING')"
+  },
+  "runtime": {
+    "rest": { "enabled": true, "path": "/api/rest" },
+    "graphql": { "enabled": true, "path": "/api/graphql" }
+  },
+  "entities": {
+    "User": {
+      "source": { "object": "dbo.Users", "type": "table" },
+      "permissions": [
+        { "role": "admin", "actions": ["create", "read", "update", "delete"] },
+        { "role": "member", "actions": ["read"] }
+      ],
+      "relationships": {
+        "todos": {
+          "cardinality": "many",
+          "target.entity": "Todo",
+          "source.fields": ["id"],
+          "target.fields": ["ownerId"]
+        }
+      }
+    },
+    "Todo": {
+      "source": { "object": "dbo.Todos", "type": "table" },
+      "permissions": [
+        { "role": "admin", "actions": ["create", "read", "update", "delete"] },
+        { "role": "member", "actions": ["create", "read", "update", "delete"] }
+      ],
+      "relationships": {
+        "owner": {
+          "cardinality": "one",
+          "target.entity": "User",
+          "source.fields": ["ownerId"],
+          "target.fields": ["id"]
+        }
+      }
+    }
+  }
+}

@@ -179,6 +179,16 @@ async function handleApi(
       return sendJson(res, 200, await controller.sendCopilotAuditFix());
     case "POST /api/fix":
       return sendJson(res, 200, await controller.fixIssue(body.lane));
+    case "POST /api/rayfin/state":
+      return sendJson(res, 200, await controller.getRayfinState(body.force === true));
+    case "POST /api/rayfin/cli":
+      controller.runRayfinCli(body.args).catch((e) => controller.log(String(e), "error"));
+      return sendJson(res, 202, { started: true });
+    case "POST /api/rayfin/switch":
+      controller
+        .switchRayfinWorkspace(String(body.name || ""))
+        .catch((e) => controller.log(String(e), "error"));
+      return sendJson(res, 202, { started: true });
     case "POST /api/debug/start":
       return sendJson(res, 200, await controller.debugStart(body));
     case "POST /api/debug/attach":

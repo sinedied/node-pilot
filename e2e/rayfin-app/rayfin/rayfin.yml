@@ -1,0 +1,18 @@
+# Rayfin project configuration.
+# Docs: https://aka.ms/rayfin/docs
+name: rayfin-todo-app
+
+services:
+  auth:
+    # Sign-in methods exposed by the generated auth API.
+    methods:
+      - fabric
+      - password
+  data:
+    # Database dialect provisioned by Rayfin (mssql | postgresql).
+    dialect: mssql
+    schema: ./data/schema.ts
+  staticHosting:
+    folder: ./src
+    indexDocument: index.html
+    buildCommand: npm run build
