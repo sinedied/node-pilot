@@ -309,6 +309,7 @@
         aria-label="Settings"
       >
         <svg class="oi" aria-hidden="true"><use href="#oct-gear" /></svg>
+        <span id="settings-update-dot" class="update-dot hidden" aria-hidden="true"></span>
       </button>
     </nav>
     <div id="pinned-empty" class="pinned-empty hidden">
@@ -884,6 +885,37 @@
               <span class="settings-row-label">Check dependencies &amp; audit</span>
               <span class="switch">
                 <input type="checkbox" id="set-autodeps" />
+                <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+              </span>
+            </label>
+          </div>
+          <div class="settings-section">
+            <h3 class="settings-title">About Cockpit.js</h3>
+            <p class="settings-hint">Cockpit checks GitHub for new releases and lets Copilot update it for you.</p>
+            <div class="about-card">
+              <div class="about-row">
+                <span class="about-version">
+                  <svg class="oi" aria-hidden="true"><use href="#oct-versions" /></svg>
+                  Cockpit.js <span id="about-version">—</span>
+                </span>
+                <span id="about-status" class="about-status">Checking for updates…</span>
+              </div>
+              <div class="about-actions">
+                <button type="button" id="update-check" class="lane-btn" data-global>
+                  <svg class="oi" aria-hidden="true"><use href="#oct-sync" /></svg>Check for updates
+                </button>
+                <a id="update-notes" class="lane-btn hidden" data-global href="https://github.com/sinedied/cockpit-js/releases" target="_blank" rel="noopener noreferrer">
+                  <svg class="oi" aria-hidden="true"><use href="#oct-link-external" /></svg>What's new
+                </a>
+                <button type="button" id="update-apply" class="copilot-btn hidden" data-global>
+                  <svg class="oi" aria-hidden="true"><use href="#oct-download" /></svg>Update Cockpit.js
+                </button>
+              </div>
+            </div>
+            <label class="settings-row toggle-row">
+              <span class="settings-row-label">Check for updates on launch</span>
+              <span class="switch">
+                <input type="checkbox" id="set-checkupdates" />
                 <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
               </span>
             </label>

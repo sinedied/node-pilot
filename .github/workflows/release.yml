@@ -1,0 +1,47 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+# Allow semantic-release to create the GitHub Release/tag, push the version-bump
+# commit back to main, and comment on released issues/PRs.
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+# Never run two releases at once: overlapping pushes would race the bump-back
+# commit. Don't cancel an in-flight release.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # semantic-release needs the full history + tags to compute the next version.
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.18"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Release gate: never publish a broken build (lint + build + smoke + tests).
+      - name: Check
+        run: npm run check
+
+      - name: Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx semantic-release

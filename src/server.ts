@@ -185,6 +185,12 @@ async function handleApi(
       return sendJson(res, 200, await controller.sendCopilotUpdate(body));
     case "POST /api/deps/audit-fix":
       return sendJson(res, 200, await controller.sendCopilotAuditFix());
+    case "POST /api/update/check":
+      return sendJson(res, 200, await controller.getUpdateInfo(body.force === true));
+    case "POST /api/update/apply": {
+      const result = await controller.sendCopilotSelfUpdate();
+      return sendJson(res, result.ok ? 200 : 400, result);
+    }
     case "POST /api/fix":
       return sendJson(res, 200, await controller.fixIssue(body.lane));
     case "POST /api/rayfin/state":

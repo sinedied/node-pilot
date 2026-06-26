@@ -6,6 +6,10 @@
   "description": "A GitHub Copilot canvas extension to build, lint, type-check, test and run JavaScript / Node.js / web apps — and update dependencies without breaking them — from the Copilot app side panel.",
   "license": "MIT",
   "author": "Yohan Lasorsa",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sinedied/cockpit-js.git"
+  },
   "keywords": [
     "github-copilot",
     "copilot-extension",
@@ -41,11 +45,14 @@
   "devDependencies": {
     "@astrojs/starlight": "^0.40.0",
     "@biomejs/biome": "^2.5.1",
+    "@semantic-release/changelog": "^6.0.3",
+    "@semantic-release/git": "^10.0.1",
     "@types/node": "^22.10.0",
     "@vitest/coverage-v8": "^4.1.9",
     "astro": "^6.4.8",
     "cytoscape": "^3.34.0",
     "cytoscape-fcose": "^2.2.0",
+    "semantic-release": "^25.0.5",
     "sharp": "^0.35.2",
     "typescript": "^6.0.3",
     "vitest": "^4.1.9"

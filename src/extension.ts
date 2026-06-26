@@ -11,6 +11,7 @@ import {
 import { Controller } from "./controller.ts";
 import { startServer } from "./server.ts";
 import { buildActions } from "./actions.ts";
+import { readPackageMetaSync } from "./update.ts";
 
 const cwd = process.cwd();
 
@@ -48,7 +49,11 @@ async function sendImageToChat(
   }
 }
 
-const controller = new Controller(cwd, { sendToChat, sendImageToChat });
+// Own version + distribution repo, read once from the root package.json. Drives
+// the self-update check (compares against sinedied/cockpit-js GitHub Releases).
+const { version, repoSlug } = readPackageMetaSync();
+
+const controller = new Controller(cwd, { sendToChat, sendImageToChat, version, repoSlug });
 
 // One loopback server per open canvas instance; they all share `controller`.
 const servers = new Map<string, Awaited<ReturnType<typeof startServer>>>();

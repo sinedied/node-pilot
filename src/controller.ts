@@ -41,6 +41,13 @@ import { readRayfinState, validateRayfinArgs, rayfinArgv } from "./rayfin.ts";
 import { enumerateProjects } from "./projects.ts";
 import * as deps from "./deps.ts";
 import type { SafeUpdateOptions, SafeUpdateResult } from "./deps.ts";
+import {
+  DEFAULT_REPO_SLUG,
+  EXTENSION_DIR,
+  checkForUpdate,
+  buildSelfUpdatePrompt,
+  type UpdateInfo,
+} from "./update.ts";
 import type { TestOptions } from "./lanes.ts";
 import type {
   AppEvent,
@@ -101,6 +108,13 @@ export interface ControllerOptions {
   // Run the user's configured on-load tasks after the first detection. Defaults
   // to true; tests/hosts can disable it for deterministic, race-free runs.
   autoRun?: boolean;
+  // The running extension's own version + distribution repo, read from the root
+  // package.json by extension.ts. Used by the self-update check. Defaults keep the
+  // controller usable in tests without a package.json.
+  version?: string;
+  repoSlug?: string;
+  // Test seam: override the fetch used by the update check.
+  fetchImpl?: typeof globalThis.fetch;
 }
 
 interface LaneRunResult {
@@ -160,13 +174,28 @@ export class Controller {
   _testWatch: TestWatchSession | null;
   _autoRanFor: Set<string>;
   _autoRunning: boolean;
+  // Self-update: the running version + distribution repo, plus a cached check
+  // result (the process is long-lived, so we throttle network checks).
+  version: string;
+  repoSlug: string;
+  _fetchImpl: typeof globalThis.fetch;
+  _update: UpdateInfo | null;
+  _updatePromise: Promise<UpdateInfo> | null;
 
-  constructor(cwd: string, { sendToChat, sendImageToChat, autoRun }: ControllerOptions = {}) {
+  constructor(
+    cwd: string,
+    { sendToChat, sendImageToChat, autoRun, version, repoSlug, fetchImpl }: ControllerOptions = {},
+  ) {
     this.cwd = cwd;
     this.root = cwd;
     this.sendToChat = sendToChat || (async () => {});
     this.sendImageToChat = sendImageToChat || (async () => {});
     this.autoRun = autoRun !== false;
+    this.version = version || "0.0.0";
+    this.repoSlug = repoSlug || DEFAULT_REPO_SLUG;
+    this._fetchImpl = fetchImpl || globalThis.fetch;
+    this._update = null;
+    this._updatePromise = null;
     this.events = new EventEmitter();
     this.events.setMaxListeners(100);
     this.detection = null;
@@ -435,6 +464,7 @@ export class Controller {
       autoProblems: s.autoProblems,
       autoTest: s.autoTest,
       autoDeps: s.autoDeps,
+      checkUpdatesOnLaunch: s.checkUpdatesOnLaunch,
     };
   }
 
@@ -447,6 +477,8 @@ export class Controller {
     if (typeof patch.autoProblems === "boolean") clean.autoProblems = patch.autoProblems;
     if (typeof patch.autoTest === "boolean") clean.autoTest = patch.autoTest;
     if (typeof patch.autoDeps === "boolean") clean.autoDeps = patch.autoDeps;
+    if (typeof patch.checkUpdatesOnLaunch === "boolean")
+      clean.checkUpdatesOnLaunch = patch.checkUpdatesOnLaunch;
     const s = await saveSettings(this.cwd, clean);
     const pinnedTasks = s.pinnedTasks ?? defaultPinnedTasks(this.detection);
     return {
@@ -457,12 +489,14 @@ export class Controller {
       autoProblems: s.autoProblems,
       autoTest: s.autoTest,
       autoDeps: s.autoDeps,
+      checkUpdatesOnLaunch: s.checkUpdatesOnLaunch,
     };
   }
 
   getState() {
     return {
       cwd: this.cwd,
+      version: this.version,
       detection: this.detection,
       lanes: Object.fromEntries(
         Object.entries(this.lanes).map(([id, l]) => [id, { ...l, output: l.output.join("") }]),
@@ -1405,7 +1439,54 @@ export class Controller {
     return { ok: true };
   }
 
-  // "Fix with Copilot" for the Security section: remediate known vulnerabilities.
+  // ---- Self-update (the extension's own version) --------------------------
+
+  // Cached GitHub Releases check. The process is long-lived, so auto-checks reuse
+  // the last result for ~6h; `force` (manual "Check for updates") bypasses it.
+  // Network/rate-limit/404 failures are non-fatal: we keep the last good data and
+  // surface `error` so the UI can show a quiet "couldn't check" instead of nagging.
+  async getUpdateInfo(force = false): Promise<UpdateInfo> {
+    const SIX_HOURS = 6 * 60 * 60 * 1000;
+    if (!force && this._update && Date.now() - this._update.checkedAt < SIX_HOURS) {
+      return this._update;
+    }
+    if (this._updatePromise) return this._updatePromise;
+    this._updatePromise = checkForUpdate(this.version, this.repoSlug, {
+      fetchImpl: this._fetchImpl,
+    })
+      .then((info) => {
+        // On a failed re-check keep the last successful result but refresh the error.
+        if (info.error && this._update && !this._update.error) {
+          this._update = { ...this._update, error: info.error, checkedAt: info.checkedAt };
+        } else {
+          this._update = info;
+        }
+        return this._update;
+      })
+      .finally(() => {
+        this._updatePromise = null;
+      });
+    return this._updatePromise;
+  }
+
+  // "Update Cockpit.js": hand the file swap + reload to Copilot chat. The extension
+  // can't reload itself, so this is the only path that can fully apply an update.
+  async sendCopilotSelfUpdate(): Promise<{ ok: boolean; reason?: string }> {
+    const info = await this.getUpdateInfo();
+    if (!info.updateAvailable || !info.latestVersion) {
+      return { ok: false, reason: "Cockpit.js is up to date." };
+    }
+    const prompt = buildSelfUpdatePrompt({
+      installDir: EXTENSION_DIR,
+      currentVersion: info.currentVersion,
+      latestVersion: info.latestVersion,
+      repoSlug: this.repoSlug,
+      releaseUrl: info.releaseUrl,
+    });
+    await this.sendToChat(prompt);
+    this.log(`Asked Copilot to update Cockpit.js to v${info.latestVersion}.`);
+    return { ok: true };
+  }
   async sendCopilotAuditFix(): Promise<{ ok: boolean; reason?: string }> {
     if (!this.deps.audit) await this.runAudit().catch(() => {});
     const vulnerabilities = this.deps.audit?.vulnerabilities || [];

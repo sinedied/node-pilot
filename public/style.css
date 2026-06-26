@@ -2257,6 +2257,7 @@ table.dep-table {
 /* ---- Settings gear ---- */
 .settings-gear {
   flex: 0 0 auto;
+  position: relative;
 }
 .settings-gear.active {
   border-color: var(--accent);
@@ -2264,6 +2265,19 @@ table.dep-table {
 }
 .settings-gear.active .oi {
   color: var(--accent);
+}
+/* Discoverability dot on the gear when an extension update is available. Uses the
+   accent token (informational, not an error), flat and theme-aware. */
+.update-dot {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 1.5px solid var(--bg);
+  pointer-events: none;
 }
 
 /* ---- Settings panel ---- */
@@ -2350,6 +2364,67 @@ table.dep-table {
 
 .settings-row .switch {
   margin-left: auto;
+}
+
+/* ---- About / self-update --------------------------------------------- */
+.about-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  margin-bottom: 8px;
+}
+
+.about-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.about-version {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: var(--font-weight-semibold, 600);
+  color: var(--text);
+}
+.about-version .oi {
+  color: var(--dim);
+}
+
+.about-status {
+  font-size: 12px;
+  color: var(--dim);
+}
+.about-status.up-to-date {
+  color: var(--green);
+}
+.about-status.available {
+  color: var(--accent);
+  font-weight: var(--font-weight-semibold, 600);
+}
+.about-status.error {
+  color: var(--dim);
+}
+
+.about-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+#update-check.spinning .oi {
+  animation: oi-spin 0.7s linear infinite;
+}
+a#update-notes.lane-btn {
+  text-decoration: none;
 }
 
 /* ---- Debugger ---------------------------------------------------------- */

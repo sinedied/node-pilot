@@ -40,7 +40,10 @@ const state = {
     autoProblems: false,
     autoTest: false,
     autoDeps: false,
+    checkUpdatesOnLaunch: true,
   },
+  version: null,
+  update: null,
   stats: null,
   tsLs: {
     status: "stopped",
@@ -397,8 +400,10 @@ function badge(text, muted) {
 
 function setControlsEnabled(enabled) {
   // .copilot-btn shares this project-scoped disable path with .lane-btn (the
-  // Fix/Send/Update handoffs were .lane-btn before the design pass).
-  $$(".lane-btn, .copilot-btn").forEach((b) => {
+  // Fix/Send/Update handoffs were .lane-btn before the design pass). The
+  // self-update controls are about the extension, not the project, so they're
+  // marked [data-global] and stay usable even with no project open.
+  $$(".lane-btn:not([data-global]), .copilot-btn:not([data-global])").forEach((b) => {
     b.disabled = !enabled;
   });
   $("#scripts-toggle").disabled = !enabled;
@@ -2742,6 +2747,7 @@ function applySettings(s) {
     autoProblems: !!s.autoProblems,
     autoTest: !!s.autoTest,
     autoDeps: !!s.autoDeps,
+    checkUpdatesOnLaunch: s.checkUpdatesOnLaunch !== false,
   };
   applyTheme(state.settings.theme);
   renderPinned();
@@ -2760,6 +2766,7 @@ function applyEvent(e) {
       Object.assign(state, e.state);
       state.lanes = e.state.lanes || {};
       renderProject();
+      renderAbout();
       renderTests();
       syncTestWatchSwitch();
       renderProblems();
@@ -3563,6 +3570,9 @@ function renderSettingsPanel() {
   if (at) at.checked = !!state.settings.autoTest;
   const ad = $("#set-autodeps");
   if (ad) ad.checked = !!state.settings.autoDeps;
+  const cu = $("#set-checkupdates");
+  if (cu) cu.checked = state.settings.checkUpdatesOnLaunch !== false;
+  renderAbout();
 
   const list = $("#settings-tabs");
   if (!list) return;
@@ -3639,6 +3649,79 @@ $("#set-autotest").addEventListener("change", (e) =>
 $("#set-autodeps").addEventListener("change", (e) =>
   persistSettings({ autoDeps: e.currentTarget.checked }),
 );
+$("#set-checkupdates").addEventListener("change", (e) =>
+  persistSettings({ checkUpdatesOnLaunch: e.currentTarget.checked }),
+);
+
+// ---- Self-update ----------------------------------------------------------
+// Cockpit can't reload itself, so "Update Cockpit.js" hands the swap to Copilot
+// chat. The check compares the running version against the latest GitHub Release
+// of the distribution repo; failures stay quiet (never a false "update ready").
+
+let updateChecking = false;
+
+// Render the About card (version line + status) and the gear update dot from
+// state.version (state snapshot) and state.update (the last check result).
+function renderAbout() {
+  const verEl = $("#about-version");
+  if (verEl) verEl.textContent = state.version ? `v${state.version}` : "—";
+
+  const statusEl = $("#about-status");
+  const notes = $("#update-notes");
+  const apply = $("#update-apply");
+  const dot = $("#settings-update-dot");
+  const u = state.update;
+
+  if (statusEl) {
+    statusEl.classList.remove("up-to-date", "available", "error");
+    if (updateChecking && !u) {
+      statusEl.textContent = "Checking for updates…";
+    } else if (!u) {
+      statusEl.textContent = "";
+    } else if (u.error) {
+      statusEl.textContent = "Couldn't check for updates";
+      statusEl.classList.add("error");
+    } else if (u.updateAvailable) {
+      statusEl.textContent = `Update available → v${u.latestVersion}`;
+      statusEl.classList.add("available");
+    } else {
+      statusEl.textContent = "Up to date";
+      statusEl.classList.add("up-to-date");
+    }
+  }
+
+  const available = !!(u?.updateAvailable && !u.error);
+  if (notes) {
+    notes.classList.toggle("hidden", !(available && u.releaseUrl));
+    if (available && u.releaseUrl) notes.href = u.releaseUrl;
+  }
+  if (apply) apply.classList.toggle("hidden", !available);
+  if (dot) dot.classList.toggle("hidden", !available);
+}
+
+async function runUpdateCheck(force) {
+  if (updateChecking) return;
+  updateChecking = true;
+  const btn = $("#update-check");
+  if (btn) btn.classList.toggle("spinning", true);
+  renderAbout();
+  try {
+    const info = await api("/api/update/check", { force: !!force });
+    if (info && typeof info === "object") state.update = info;
+  } finally {
+    updateChecking = false;
+    if (btn) btn.classList.toggle("spinning", false);
+    renderAbout();
+  }
+}
+
+$("#update-check").addEventListener("click", () => runUpdateCheck(true));
+
+$("#update-apply").addEventListener("click", async () => {
+  const res = await api("/api/update/apply", {});
+  if (res?.ok) toast("Asked Copilot to update Cockpit.js…");
+  else toast(res?.reason || "Couldn't start the update.");
+});
 
 // Apply persisted tab order/visibility before opening the SSE stream so a custom
 // layout doesn't briefly flash in the default order on first paint. connect()
@@ -3647,6 +3730,8 @@ $("#set-autodeps").addEventListener("change", (e) =>
 refreshSettings().finally(() => {
   loadProjects();
   connect();
+  // Auto-check after settings load so we honor the checkUpdatesOnLaunch toggle.
+  if (state.settings.checkUpdatesOnLaunch !== false) runUpdateCheck(false);
 });
 
 // Keep the tab bar and toolbar responsive: recompute their overflow menus

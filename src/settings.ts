@@ -41,6 +41,7 @@ const DEFAULTS: Settings = {
   autoProblems: true,
   autoTest: true,
   autoDeps: true,
+  checkUpdatesOnLaunch: true,
 };
 
 const LANE_IDS = new Set<LaneId>(["build", "typecheck", "lint", "format", "test"]);
@@ -93,6 +94,7 @@ export function migrate(raw: Partial<Settings> | undefined): Settings {
     autoProblems: (raw?.autoProblems ?? raw?.autoLint) !== false,
     autoTest: raw?.autoTest !== false,
     autoDeps: raw?.autoDeps !== false,
+    checkUpdatesOnLaunch: raw?.checkUpdatesOnLaunch !== false,
     activeProject: typeof raw?.activeProject === "string" ? raw.activeProject : null,
   };
   if (raw && "pinnedTasks" in raw) {
@@ -153,6 +155,8 @@ async function doSaveSettings(projectKey: string, patch: SettingsPatch): Promise
   if (typeof patch.autoProblems === "boolean") next.autoProblems = patch.autoProblems;
   if (typeof patch.autoTest === "boolean") next.autoTest = patch.autoTest;
   if (typeof patch.autoDeps === "boolean") next.autoDeps = patch.autoDeps;
+  if (typeof patch.checkUpdatesOnLaunch === "boolean")
+    next.checkUpdatesOnLaunch = patch.checkUpdatesOnLaunch;
   if (typeof patch.activeProject === "string" || patch.activeProject === null)
     next.activeProject = patch.activeProject;
   // Persist the new schema only; drop the legacy `pinnedScripts`/`autoLint` keys.
@@ -164,6 +168,7 @@ async function doSaveSettings(projectKey: string, patch: SettingsPatch): Promise
     autoProblems: next.autoProblems,
     autoTest: next.autoTest,
     autoDeps: next.autoDeps,
+    checkUpdatesOnLaunch: next.checkUpdatesOnLaunch,
     activeProject: next.activeProject,
   };
   await writeAll(all);

@@ -26,6 +26,8 @@ inspiration: [coffilot](https://github.com/jdubois/coffilot). Full design in
     Problems panel, `controller.ts` (central state + SSE
     events), `server.ts` (http + SSE + `/api/*`), `actions.ts` (agent actions),
     `fix.ts` (prompt builders), `settings.ts` (per-project pinned tasks + theme),
+    `update.ts` (SDK-free self-update check: semver compare + GitHub Releases fetch +
+    `package.json` meta read + the self-update prompt builder, see "Self-update" below),
     `cdp.ts` (zero-dep Chrome DevTools Protocol client) + `debug.ts` (`DebugSession`:
     the agent-facing Node.js debugger — launch/attach, breakpoints, stepping, inspect),
     `projects.ts` (`enumerateProjects(root)` — monorepo / multi-root discovery powering
@@ -60,7 +62,7 @@ inspiration: [coffilot](https://github.com/jdubois/coffilot). Full design in
   `public/preview-capture.js` is the capture bridge injected into the proxied preview;
   `public/vendor/snapdom.min.js` is the vendored rasterizer it uses (see gotcha below).
 - `test/` — Vitest specs (`core.test.ts`, `deps.test.ts`, `info.test.ts`,
-  `settings.test.ts`, `ts-server.test.ts`). `scripts/smoke.mjs`
+  `settings.test.ts`, `ts-server.test.ts`, `update.test.ts`). `scripts/smoke.mjs`
   dynamically imports every SDK-free `src/*.ts` to prove native type-stripping loads.
 - `biome.json` — Biome config (lint + format, replaces Prettier). `noImportantStyles`
   is off (the cursor/spinner `!important` rules are deliberate, see gotcha below).
@@ -88,6 +90,9 @@ inspiration: [coffilot](https://github.com/jdubois/coffilot). Full design in
   `e2e/` (→ monorepo detection signal). Mock dotfiles contain **only fabricated**
   values — never real secrets.
 - `.github/workflows/ci.yml` — CI (`biome ci .` → build → smoke → test) on Node 22.18 & 24.
+- `.github/workflows/release.yml` + `.releaserc.json` — semantic-release pipeline that cuts
+  GitHub Releases on push to `main` (the Releases the self-update check reads back; see
+  "Self-update & release pipeline").
 
 ## Critical gotchas
 
@@ -419,7 +424,67 @@ The agent dev loop for any change:
   which collapses hidden badges into a single **severity dot** on `⋯` (red > yellow > blue,
   no number — counts across tabs aren't summable).
 
-## Design system
+## Self-update & release pipeline
+
+Cockpit checks for newer releases of itself and lets Copilot apply the update; an
+automated GitHub Actions pipeline cuts those releases. The two halves are coupled — the
+update-check reads exactly the Releases the pipeline produces — so keep them in lockstep.
+
+### Distribution repo
+
+- **`sinedied/cockpit-js` is the distribution/canonical repo** (where releases are cut and
+  read back). The dev repo is `node-pilot`. The update-check and `.releaserc.json` both
+  assume `cockpit-js`. The local clone's remote may still say `node-pilot` → the GitHub
+  repo must be renamed/pointed to `cockpit-js` for releases to land where the check looks.
+- The slug is derived from `package.json` `repository`, falling back to the
+  `DEFAULT_REPO_SLUG` constant in `src/update.ts`.
+
+### Self-update feature
+
+- **Source of truth = GitHub Releases.** `src/update.ts` (pure, SDK-free, unit-tested) does
+  semver compare + `GET /repos/<slug>/releases/latest`. Any failure (offline / rate-limited
+  / 404 no-releases / 5s timeout) returns `error: true` and **never** a false
+  "update available" — the UI shows a quiet "Couldn't check for updates".
+- **Mechanism = Copilot-assisted.** The extension can't reload itself; only the host/agent
+  can `extensions_reload`. So "Update Cockpit.js" hands a crafted prompt (install dir,
+  current→latest, release URL) to chat via `sendToChat` (`buildSelfUpdatePrompt`), mirroring
+  `sendCopilotUpdate`. Never auto-apply — only on an explicit click.
+- **Controller:** `version`/`repoSlug` come in via `ControllerOptions` (read once from
+  `package.json` by `extension.ts` → `readPackageMetaSync()`), are exposed in `getState()`,
+  and drive `getUpdateInfo(force)` (in-memory cache, ~6h throttle; `force` bypasses) +
+  `sendCopilotSelfUpdate()`. Network checks are non-fatal and keep the last good result.
+- **Routes:** `POST /api/update/check {force}` → `getUpdateInfo`; `POST /api/update/apply` →
+  `sendCopilotSelfUpdate`.
+- **Setting:** `checkUpdatesOnLaunch` (default true) — same per-project storage as
+  `theme`/`auto*` even though it's semantically global; the on-load check honors it.
+- **UI:** Settings → "About Cockpit.js" card (version line, status, "Check for updates"
+  `.lane-btn`, "What's new" external link, gradient "Update Cockpit.js" `.copilot-btn`) plus
+  an accent **update dot** on the gear (`#settings-update-dot`) when an update is available.
+  The self-update controls are **extension-scoped, not project-scoped** → marked
+  `[data-global]` and excluded from `setControlsEnabled` (the `.lane-btn:not([data-global]),
+  .copilot-btn:not([data-global])` selector) so they stay usable with no project open.
+
+### Release pipeline (semantic-release)
+
+- `.github/workflows/release.yml` runs on push to `main`: checkout (`fetch-depth: 0`),
+  Node 22.18, `npm ci`, **`npm run check`** as a release gate, then `npx semantic-release`
+  with the built-in `GITHUB_TOKEN`. `concurrency: release` serializes runs.
+- `.releaserc.json`: branches `["main"]`; commit-analyzer + release-notes-generator +
+  `@semantic-release/changelog` + `@semantic-release/npm` with **`npmPublish: false`** (bumps
+  `package.json` version without publishing — the package is `private`) +
+  `@semantic-release/git` (commits `package.json` + `package-lock.json` + `CHANGELOG.md` back
+  as `chore(release): x.y.z [skip ci]`, the `[skip ci]` avoiding a CI loop) +
+  `@semantic-release/github` (creates the Release/tag).
+- **Why coupled:** every release bumps `package.json` version AND tags a matching Release, so
+  an installed copy's version always lines up with `releases/latest` → `updateAvailable` is
+  accurate.
+- **Caveats:** (a) if `main` is branch-protected to require PRs, the direct bump-back push
+  fails → allow the Action to bypass, use a PAT, or switch to release-please (PR-based).
+  (b) First semantic-release run defaults to `v1.0.0`; to keep a `0.x` line, seed a `v0.1.0`
+  tag first. (c) Validate with `npx semantic-release --dry-run` (needs a token); don't
+  trigger a real release as part of unrelated work.
+
+
 
 The canvas UI targets the **GitHub App look** in both light and dark. All visuals are
 hand-rolled in `public/index.html` + `public/style.css` (the host mirrors its own theme

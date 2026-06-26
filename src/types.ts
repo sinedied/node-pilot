@@ -522,6 +522,8 @@ export interface Settings {
   autoProblems: boolean;
   autoTest: boolean;
   autoDeps: boolean;
+  // Check GitHub Releases for a newer Cockpit.js version when the extension loads.
+  checkUpdatesOnLaunch: boolean;
   // Monorepo focus: absolute dir of the last project the user selected for this
   // session root. Stored under the root's settings entry, read back on re-open.
   activeProject?: string | null;
@@ -538,6 +540,7 @@ export interface ResolvedSettings {
   autoProblems: boolean;
   autoTest: boolean;
   autoDeps: boolean;
+  checkUpdatesOnLaunch: boolean;
 }
 
 export interface SettingsPatch {
@@ -548,6 +551,7 @@ export interface SettingsPatch {
   autoProblems?: boolean;
   autoTest?: boolean;
   autoDeps?: boolean;
+  checkUpdatesOnLaunch?: boolean;
   activeProject?: string | null;
 }
 
