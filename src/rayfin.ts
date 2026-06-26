@@ -21,6 +21,22 @@ import type {
 
 const DOCS_URL = "https://github.com/microsoft/rayfin";
 
+// Canonical Rayfin / Microsoft Fabric Apps reference links surfaced in the
+// dashboard (and the no-project intro state on the client).
+const RAYFIN_LINKS: Array<{ label: string; url: string; icon: string }> = [
+  {
+    label: "Fabric Apps docs",
+    url: "https://learn.microsoft.com/en-us/fabric/apps/overview",
+    icon: "oct-book",
+  },
+  { label: "Rayfin on GitHub", url: DOCS_URL, icon: "oct-mark-github" },
+  {
+    label: "Awesome Rayfin",
+    url: "https://github.com/microsoft/awesome-rayfin",
+    icon: "oct-star",
+  },
+];
+
 // ---- Detection ------------------------------------------------------------
 
 // Cheap detection from the rayfin/ dir + dependency set. Returns null when the
@@ -294,6 +310,7 @@ export async function readRayfinState(cwd: string): Promise<RayfinState> {
       deployments: existsSyncSafe(deploymentsPath) ? deploymentsPath : null,
     },
     docsUrl: DOCS_URL,
+    links: RAYFIN_LINKS,
     at: Date.now(),
   };
 }

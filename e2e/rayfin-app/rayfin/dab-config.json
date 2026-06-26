@@ -16,11 +16,39 @@
         { "role": "member", "actions": ["read"] }
       ],
       "relationships": {
+        "projects": {
+          "cardinality": "many",
+          "target.entity": "Project",
+          "source.fields": ["id"],
+          "target.fields": ["ownerId"]
+        }
+      }
+    },
+    "Category": {
+      "source": { "object": "dbo.Categories", "type": "table" },
+      "permissions": [
+        { "role": "admin", "actions": ["create", "read", "update", "delete"] },
+        { "role": "member", "actions": ["read"] }
+      ]
+    },
+    "Project": {
+      "source": { "object": "dbo.Projects", "type": "table" },
+      "permissions": [
+        { "role": "admin", "actions": ["create", "read", "update", "delete"] },
+        { "role": "member", "actions": ["create", "read", "update"] }
+      ],
+      "relationships": {
+        "owner": {
+          "cardinality": "one",
+          "target.entity": "User",
+          "source.fields": ["ownerId"],
+          "target.fields": ["id"]
+        },
         "todos": {
           "cardinality": "many",
           "target.entity": "Todo",
           "source.fields": ["id"],
-          "target.fields": ["ownerId"]
+          "target.fields": ["projectId"]
         }
       }
     },
@@ -31,10 +59,44 @@
         { "role": "member", "actions": ["create", "read", "update", "delete"] }
       ],
       "relationships": {
-        "owner": {
+        "project": {
+          "cardinality": "one",
+          "target.entity": "Project",
+          "source.fields": ["projectId"],
+          "target.fields": ["id"]
+        },
+        "assignee": {
           "cardinality": "one",
           "target.entity": "User",
-          "source.fields": ["ownerId"],
+          "source.fields": ["assigneeId"],
+          "target.fields": ["id"]
+        }
+      }
+    },
+    "Tag": {
+      "source": { "object": "dbo.Tags", "type": "table" },
+      "permissions": [
+        { "role": "admin", "actions": ["create", "read", "update", "delete"] },
+        { "role": "member", "actions": ["read"] }
+      ]
+    },
+    "Comment": {
+      "source": { "object": "dbo.Comments", "type": "table" },
+      "permissions": [
+        { "role": "admin", "actions": ["create", "read", "update", "delete"] },
+        { "role": "member", "actions": ["create", "read"] }
+      ],
+      "relationships": {
+        "todo": {
+          "cardinality": "one",
+          "target.entity": "Todo",
+          "source.fields": ["todoId"],
+          "target.fields": ["id"]
+        },
+        "author": {
+          "cardinality": "one",
+          "target.entity": "User",
+          "source.fields": ["authorId"],
           "target.fields": ["id"]
         }
       }

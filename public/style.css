@@ -403,6 +403,11 @@ body {
   outline: none;
   box-shadow: 0 0 0 3px var(--focus-ring);
 }
+/* List rows show selection via .active (bg + inset bar); focus is a subtle bg, no ring. */
+.rf-entity-row:focus-visible {
+  outline: none;
+  background: var(--bg-inset);
+}
 
 /* Disabled controls stay visually inert (no hover lift / no press). */
 .lane-btn:disabled,
@@ -433,7 +438,9 @@ body {
   border: 1px solid var(--border);
   color: var(--text);
   border-radius: var(--radius);
-  padding: 5px 11px;
+  padding: 4px 11px;
+  min-height: 28px;
+  line-height: 1;
   font-weight: 500;
   font-size: 12px;
   white-space: nowrap;
@@ -447,6 +454,8 @@ body {
 }
 
 .lane-btn .oi {
+  width: 14px;
+  height: 14px;
   color: var(--dim);
 }
 
@@ -1690,18 +1699,17 @@ table.dep-table {
 .rf-tag.role {
   color: var(--purple);
 }
-.rf-select {
-  background: var(--bg);
-  color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 3px 6px;
-  font-size: 12px;
-}
-.rf-switch-label {
+.rf-switch-wrap {
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  flex: 0 0 auto;
+}
+.rf-export-wrap {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
 }
 .rf-card {
   border: 1px solid var(--border);
@@ -1730,6 +1738,11 @@ table.dep-table {
   flex-wrap: wrap;
   gap: 12px;
 }
+.rf-docs-links {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
 .rf-link {
   display: inline-flex;
   align-items: center;
@@ -1741,23 +1754,146 @@ table.dep-table {
 .rf-link:hover {
   text-decoration: underline;
 }
-.rf-entities {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 10px;
+.rf-intro {
+  display: flex;
+  justify-content: center;
+  padding: 32px 16px;
 }
-.rf-entity {
+.rf-intro-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 14px;
+  max-width: 420px;
+  padding: 24px;
+  background: var(--bg-elev);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 8px 10px;
+  box-shadow: var(--shadow-sm);
+}
+.rf-intro-icon {
+  width: 36px;
+  height: 36px;
+  color: var(--accent);
+}
+.rf-intro-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+.rf-intro-lead {
+  margin: 0;
+  color: var(--dim);
+  font-size: 13px;
+  line-height: 1.55;
+}
+.rf-intro-links {
+  margin-top: 2px;
+}
+.rf-model-2pane {
+  display: grid;
+  grid-template-columns: minmax(150px, 240px) 1fr;
+  gap: 12px;
+  align-items: start;
+}
+.rf-entity-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 360px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 4px;
   background: var(--bg-elev);
 }
-.rf-entity-head {
+.rf-entity-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  border-radius: var(--radius);
+  padding: 5px 8px;
+  font: inherit;
+  white-space: nowrap;
+}
+.rf-entity-row:hover {
+  background: var(--bg-inset);
+}
+.rf-entity-row.active {
+  background: color-mix(in srgb, var(--accent) 14%, var(--bg-elev));
+}
+.rf-dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--dim);
+}
+.rf-dot.entity {
+  background: var(--green);
+}
+.rf-dot.role {
+  background: var(--purple);
+}
+.rf-row-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 600;
+}
+.rf-row-meta {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--dim);
+}
+.rf-entity-detail {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  background: var(--bg-elev);
+  min-height: 80px;
+}
+.rf-entity-detail-head {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 6px;
-  margin-bottom: 6px;
+  margin-bottom: 8px;
+}
+.rf-detail-sub {
+  font-size: 11px;
+  color: var(--dim);
+  margin: 8px 0 4px;
+}
+.rf-rel-type {
+  color: var(--accent);
+}
+.rf-model-graph {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.rf-graph-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.rf-graph-hint {
+  font-size: 11px;
+  color: var(--dim);
+}
+.rf-graph-canvas {
+  height: 420px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
 }
 .rf-fields {
   width: 100%;

@@ -1541,6 +1541,36 @@ export class Controller {
     await this.sendToChat(prompt);
   }
 
+  // Kick off a brand-new Rayfin project by handing the canonical setup prompt to
+  // Copilot chat. Available even when no Rayfin (or Node) project is detected.
+  async startRayfinProject({
+    requireNoProject = false,
+  }: {
+    requireNoProject?: boolean;
+  } = {}): Promise<{ ok: boolean; reason?: string }> {
+    // The HTTP route (`POST /api/rayfin/start`) is reachable from proxied
+    // dev-server content via the same-origin preview proxy, so an untrusted page
+    // could POST it to inject a chat prompt. The UI only exposes this in the
+    // no-project intro state — and with no project there is no dev server to
+    // proxy — so HTTP callers are rejected when a project exists. The agent tool
+    // calls this directly (requireNoProject=false) and is unaffected.
+    if (requireNoProject && this.detection?.hasProject) {
+      return {
+        ok: false,
+        reason: "A project already exists here — create a new Rayfin app in an empty folder.",
+      };
+    }
+    let prompt: string;
+    try {
+      prompt = await readFile(new URL("./prompts/rayfin-start.md", import.meta.url), "utf8");
+    } catch {
+      return { ok: false, reason: "New-project prompt is unavailable." };
+    }
+    await this.sendToChat(prompt);
+    this.log("Asked Copilot to scaffold a new Rayfin project.");
+    return { ok: true };
+  }
+
   // Send a captured screenshot of the running app to the chat, with an optional
   // user prompt. Falls back to a sensible default prompt when none is given.
   async sendScreenshotToChat(

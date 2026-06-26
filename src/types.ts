@@ -166,6 +166,7 @@ export interface RayfinState {
   hasAgentFiles: boolean;
   paths: { config: string | null; schema: string | null; deployments: string | null };
   docsUrl: string;
+  links: Array<{ label: string; url: string; icon: string }>;
   at: number;
 }
 

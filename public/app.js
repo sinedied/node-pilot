@@ -207,7 +207,15 @@ function showTab(name) {
   for (const b of tabBtns()) b.classList.toggle("active", b.dataset.tab === name);
   for (const p of $$(".tab-panel")) p.classList.toggle("active", p.id === `tab-${name}`);
   if (name === "problems") requestDiagnostics();
-  if (name === "rayfin") loadRayfin();
+  if (name === "rayfin") {
+    loadRayfin();
+    // If a graph was built earlier it may have been sized against a hidden
+    // container; correct it now that the panel is visible.
+    if (rfCytoscape) {
+      rfCytoscape.resize();
+      rfCytoscape.fit(undefined, 20);
+    }
+  }
   if (name === "debugger" && state.debug.status === "paused" && !dbgVars) refreshDebugVariables();
   recomputeTabOverflow();
 }
@@ -653,7 +661,8 @@ function renderTabs() {
     "hidden",
     hasProject && a.diagnostics === false && a.lint === false,
   );
-  $("#tabbtn-rayfin").classList.toggle("hidden", !(hasProject && state.detection?.rayfin));
+  $("#tabbtn-rayfin").classList.toggle("hidden", hasProject && !state.detection?.rayfin);
+  renderRayfin();
   const active = $(".tabs button.active");
   if (active?.classList.contains("hidden")) {
     const first =
@@ -674,6 +683,11 @@ function renderTabs() {
 let rayfinLoading = false;
 
 async function loadRayfin(force = false) {
+  // No project: drive the intro state directly (no CLI/state fetch needed).
+  if (!state.detection?.hasProject) {
+    renderRayfin();
+    return;
+  }
   if (!state.detection?.rayfin) return;
   if (rayfinLoading) return;
   rayfinLoading = true;
@@ -703,6 +717,27 @@ function safeHttpUrl(href) {
   }
 }
 
+// Canonical Rayfin / Microsoft Fabric Apps reference links. Mirrors RAYFIN_LINKS
+// in src/rayfin.ts; used here for the no-project intro state (where no dashboard
+// state exists yet) and as a fallback for the detected-project Docs section.
+const RAYFIN_LINKS = [
+  {
+    label: "Fabric Apps docs",
+    url: "https://learn.microsoft.com/en-us/fabric/apps/overview",
+    icon: "oct-book",
+  },
+  {
+    label: "Rayfin on GitHub",
+    url: "https://github.com/microsoft/rayfin",
+    icon: "oct-mark-github",
+  },
+  {
+    label: "Awesome Rayfin",
+    url: "https://github.com/microsoft/awesome-rayfin",
+    icon: "oct-star",
+  },
+];
+
 function rfLink(label, href, icon = "oct-link-external") {
   const safe = safeHttpUrl(href);
   if (!safe) return "";
@@ -710,11 +745,17 @@ function rfLink(label, href, icon = "oct-link-external") {
     ><svg class="oi" aria-hidden="true"><use href="#${icon}" /></svg>${esc(label)}</a>`;
 }
 
-function renderRayfinEntity(e) {
+function rfEntityDetail(e) {
+  if (!e) return '<div class="rf-empty">Select an entity to see its details.</div>';
+  const kind = e.isEntity
+    ? '<span class="rf-tag entity">entity</span>'
+    : '<span class="rf-tag role">role</span>';
   const roles = (e.roles || []).map((r) => `<span class="rf-tag">${esc(r)}</span>`).join("");
   const fields = (e.fields || [])
     .map((f) => {
-      const type = f.relation ? `${esc(f.relation.kind)} → ${esc(f.relation.target)}` : esc(f.type);
+      const type = f.relation
+        ? `<span class="rf-rel-type">${esc(f.relation.kind)} → ${esc(f.relation.target)}</span>`
+        : esc(f.type);
       const opt = f.optional ? '<span class="rf-opt">?</span>' : "";
       return `<tr><td class="rf-field-name">${esc(f.name)}${opt}</td><td class="rf-field-type">${type}</td></tr>`;
     })
@@ -727,28 +768,579 @@ function renderRayfinEntity(e) {
         )}</span></div>`,
     )
     .join("");
-  return `<div class="rf-entity">
-    <div class="rf-entity-head">
-      <strong>${esc(e.name)}</strong>
-      ${e.isEntity ? '<span class="rf-tag entity">entity</span>' : '<span class="rf-tag role">role</span>'}
-      ${roles}
+  return `<div class="rf-entity-detail-head">
+      <strong>${esc(e.name)}</strong>${kind}${roles}
     </div>
-    ${fields ? `<table class="rf-fields">${fields}</table>` : ""}
-    ${perms ? `<div class="rf-perms">${perms}</div>` : ""}
-  </div>`;
+    ${fields ? `<table class="rf-fields">${fields}</table>` : '<div class="rf-muted">No fields.</div>'}
+    ${perms ? `<div class="rf-perms-block"><div class="rf-detail-sub">Permissions</div><div class="rf-perms">${perms}</div></div>` : ""}`;
+}
+
+// ---- Fabric workspace switcher (custom dropdown, mirrors the project selector) ----
+let rayfinDeployments = [];
+
+function renderRayfinSwitch() {
+  const toggle = $("#rf-switch-toggle");
+  const name = $("#rf-switch-name");
+  if (!toggle || !name) return;
+  const list = rayfinDeployments;
+  const active = list.find((d) => d.active) || null;
+  name.textContent = active ? active.name : "— none —";
+  toggle.disabled = list.length === 0;
+  toggle.title = active
+    ? `Active Fabric workspace: ${active.name}`
+    : "No Fabric workspace deployed";
+}
+
+function renderRayfinSwitchMenu() {
+  const menu = $("#rf-switch-menu");
+  menu.innerHTML = "";
+  const list = rayfinDeployments;
+  if (!list.length) {
+    menu.innerHTML = '<div class="menu-empty">No deployments yet.</div>';
+    return;
+  }
+  for (const d of list) {
+    const isActive = !!d.active;
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = `more-menu-item project-item${isActive ? " active" : ""}`;
+    item.setAttribute("role", "menuitemradio");
+    item.setAttribute("aria-checked", isActive ? "true" : "false");
+    const check = document.createElement("svg");
+    check.setAttribute("class", "oi check");
+    check.innerHTML = '<use href="#oct-check" />';
+    const label = document.createElement("span");
+    label.className = "project-item-label";
+    const nm = document.createElement("span");
+    nm.className = "project-item-name";
+    nm.textContent = d.name;
+    label.append(nm);
+    item.append(check, label);
+    item.addEventListener("click", () => selectRayfinWorkspace(d.name));
+    menu.append(item);
+  }
+}
+
+async function selectRayfinWorkspace(name) {
+  closeRayfinSwitchMenu();
+  if (!name) return;
+  const active = rayfinDeployments.find((d) => d.active) || null;
+  if (active && active.name === name) return;
+  await api("/api/rayfin/switch", { name });
+}
+
+function openRayfinSwitchMenu() {
+  closeScriptsMenu();
+  closeTabMore();
+  closePinnedMore();
+  closeProjectMenu();
+  renderRayfinSwitchMenu();
+  const menu = $("#rf-switch-menu");
+  menu.classList.remove("hidden");
+  $("#rf-switch-toggle").setAttribute("aria-expanded", "true");
+  clampPopover(menu);
+}
+
+function closeRayfinSwitchMenu() {
+  const menu = $("#rf-switch-menu");
+  if (menu) menu.classList.add("hidden");
+  $("#rf-switch-toggle")?.setAttribute("aria-expanded", "false");
+}
+
+// ---- Data model views (two-pane List/Detail + Graph) ---------------------
+let rfEntities = [];
+let rfSelectedEntity = null;
+let rfModelView = "list";
+try {
+  if (localStorage.getItem("cockpit.rfModelView") === "graph") rfModelView = "graph";
+} catch {}
+let rfCytoscape = null; // active cytoscape instance (lazy)
+let cytoscapeLoad = null; // cached load promise
+let fcoseRegistered = false; // fcose layout extension registered on the core
+let rfGraphSig = null; // signature of the data the current graph was built from
+
+function getCytoscape() {
+  return /** @type {any} */ (window).cytoscape;
+}
+
+function loadScriptOnce(src) {
+  return new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = src;
+    s.onload = () => resolve();
+    s.onerror = () => reject(new Error(`script-load-failed:${src}`));
+    document.head.appendChild(s);
+  });
+}
+
+// Lazy-load the graph engine (cytoscape core) and, best-effort, the fcose layout
+// extension. fcose is optional: if it fails to load/register we fall back to the
+// built-in `cose` layout, so the graph always renders.
+function loadCytoscape() {
+  if (cytoscapeLoad) return cytoscapeLoad;
+  cytoscapeLoad = (async () => {
+    if (!getCytoscape()) await loadScriptOnce(`${BASE}/vendor/cytoscape.min.js`);
+    const cy = getCytoscape();
+    try {
+      const reg = /** @type {any} */ (window).cytoscapeFcose;
+      if (!reg) await loadScriptOnce(`${BASE}/vendor/cytoscape-fcose.min.js`);
+      const fcose = /** @type {any} */ (window).cytoscapeFcose;
+      if (cy && fcose && !fcoseRegistered) {
+        cy.use(fcose);
+        fcoseRegistered = true;
+      }
+    } catch {}
+    return cy;
+  })();
+  return cytoscapeLoad;
+}
+
+// Force-directed auto-layout: fcose when available, else built-in cose.
+function rfGraphLayout() {
+  if (fcoseRegistered) {
+    return {
+      name: "fcose",
+      animate: false,
+      randomize: true,
+      quality: "default",
+      idealEdgeLength: 95,
+      nodeSeparation: 90,
+      nodeRepulsion: 6500,
+      padding: 18,
+    };
+  }
+  return { name: "cose", animate: false, padding: 18, nodeRepulsion: 6500, idealEdgeLength: 95 };
+}
+
+// Run the graph layout and frame the whole graph. Done explicitly (not via the
+// cytoscape constructor's inline `layout`) so a layout failure can't leave nodes
+// stacked at the origin: on any error we fall back to the always-present built-in
+// `cose`, and we always `fit()` so every entity stays in view.
+function rfRunGraphLayout(cy) {
+  const fit = () => {
+    try {
+      cy.fit(undefined, 30);
+    } catch {}
+  };
+  const run = (cfg) => {
+    const lay = cy.layout(cfg);
+    lay.one("layoutstop", fit);
+    lay.run();
+  };
+  try {
+    run(rfGraphLayout());
+  } catch {
+    try {
+      run({ name: "cose", animate: false, padding: 18 });
+    } catch {
+      fit();
+    }
+  }
+}
+
+// Show edge labels only for the selected node's relations, plus the hovered node's
+// (if any) — keeps the resting graph to clean nodes + arrowed edges.
+function rfUpdateEdgeLabels(hoverNode) {
+  if (!rfCytoscape) return;
+  rfCytoscape.edges().removeClass("shown");
+  rfCytoscape.$("node:selected").connectedEdges().addClass("shown");
+  if (hoverNode) hoverNode.connectedEdges().addClass("shown");
+}
+
+// Clear transient Rayfin dashboard state on a project switch / initial load so
+// the previous project's graph, entity selection, or workspace list never leak
+// into the new one's loading view.
+function resetRayfinTransient() {
+  rayfinDeployments = [];
+  rfEntities = [];
+  rfSelectedEntity = null;
+  if (rfCytoscape) {
+    rfCytoscape.destroy();
+    rfCytoscape = null;
+  }
+  rfGraphSig = null;
+  closeRayfinSwitchMenu();
+  renderRayfinSwitch();
+  $("#rf-model-list")?.classList.remove("hidden");
+  $("#rf-model-graph")?.classList.add("hidden");
+}
+
+function renderRayfinModel() {
+  const listEl = $("#rf-model-list");
+  const graphEl = $("#rf-model-graph");
+  const seg = $("#rf-model-view");
+  if (!listEl || !graphEl || !seg) return;
+  for (const b of seg.querySelectorAll("button")) {
+    b.classList.toggle("on", b.dataset.view === rfModelView);
+  }
+  const entities = rfEntities;
+  if (!entities.length) {
+    rfSelectedEntity = null;
+    listEl.classList.remove("hidden");
+    graphEl.classList.add("hidden");
+    listEl.innerHTML =
+      '<div class="rf-empty">No data model found. Define entities in <b>rayfin/data/schema.ts</b>.</div>';
+    return;
+  }
+  if (!rfSelectedEntity || !entities.some((e) => e.name === rfSelectedEntity)) {
+    rfSelectedEntity = entities[0].name;
+  }
+  const graph = rfModelView === "graph";
+  listEl.classList.toggle("hidden", graph);
+  graphEl.classList.toggle("hidden", !graph);
+  renderRayfinModelList();
+  if (graph) renderRayfinGraph();
+}
+
+function renderRayfinModelList() {
+  const listEl = $("#rf-model-list");
+  if (!listEl) return;
+  const entities = rfEntities;
+  const rows = entities
+    .map((e) => {
+      const active = e.name === rfSelectedEntity;
+      const fieldCount = (e.fields || []).length;
+      const rels = (e.fields || []).filter((f) => f.relation).length;
+      const dotKind = e.isEntity ? "entity" : "role";
+      const meta = `${fieldCount} ${fieldCount === 1 ? "field" : "fields"}${rels ? ` · ${rels} rel` : ""}`;
+      return `<button type="button" class="rf-entity-row${active ? " active" : ""}" role="option" aria-selected="${active}" data-entity="${esc(e.name)}" title="${esc(e.name)}">
+        <span class="rf-dot ${dotKind}" aria-hidden="true"></span>
+        <span class="rf-row-name">${esc(e.name)}</span>
+        <span class="rf-row-meta">${meta}</span>
+      </button>`;
+    })
+    .join("");
+  const detail = rfEntityDetail(entities.find((e) => e.name === rfSelectedEntity) || null);
+  listEl.innerHTML = `<div class="rf-model-2pane">
+      <div class="rf-entity-list" role="listbox" aria-label="Entities">${rows}</div>
+      <div class="rf-entity-detail">${detail}</div>
+    </div>`;
+}
+
+function selectRayfinEntity(name, opts = {}) {
+  if (!name) return;
+  rfSelectedEntity = name;
+  renderRayfinModelList();
+  if (opts.fromGraph || !rfCytoscape) return;
+  rfCytoscape.$("node:selected").unselect();
+  const node = rfCytoscape.getElementById(name);
+  if (node && node.length) node.select();
+}
+
+function setRayfinModelView(view) {
+  rfModelView = view === "graph" ? "graph" : "list";
+  try {
+    localStorage.setItem("cockpit.rfModelView", rfModelView);
+  } catch {}
+  renderRayfinModel();
+}
+
+function rfGraphElements() {
+  const entities = rfEntities;
+  const names = new Set(entities.map((e) => e.name));
+  const nodes = entities.map((e) => ({
+    data: { id: e.name, label: e.name, kind: e.isEntity ? "entity" : "role" },
+  }));
+  const edges = [];
+  for (const e of entities) {
+    for (const f of e.fields || []) {
+      if (!f.relation || !names.has(f.relation.target)) continue;
+      edges.push({
+        data: {
+          id: `${e.name}.${f.name}`,
+          source: e.name,
+          target: f.relation.target,
+          label: `${f.name} (${f.relation.kind})`,
+          kind: f.relation.kind,
+        },
+      });
+    }
+  }
+  return [...nodes, ...edges];
+}
+
+// Structural signature of the current model — when unchanged we reuse the existing
+// graph instance (and its layout) instead of rebuilding, so toggling List/Graph
+// keeps an identical, stable layout.
+function rfGraphSignature() {
+  return rfGraphElements()
+    .map((el) =>
+      el.data.source
+        ? `${el.data.id}>${el.data.target}:${el.data.kind}`
+        : `${el.data.id}:${el.data.kind || ""}`,
+    )
+    .join("|");
+}
+
+// Sync the graph's selected node to rfSelectedEntity (used on rebuild and on reuse).
+function rfApplyGraphSelection() {
+  if (!rfCytoscape) return;
+  rfCytoscape.$("node:selected").unselect();
+  if (rfSelectedEntity) {
+    const node = rfCytoscape.getElementById(rfSelectedEntity);
+    if (node && node.length) node.select();
+  }
+  rfUpdateEdgeLabels(null);
+}
+
+// Resolve the graph palette from the live theme tokens (shared by the canvas
+// renderer and the SVG export so they look identical).
+function rfGraphColors() {
+  const css = getComputedStyle(document.body);
+  const tok = (n, fb) => (css.getPropertyValue(n) || "").trim() || fb;
+  return {
+    accent: tok("--accent", "#4493f8"),
+    text: tok("--text", "#e6edf3"),
+    dim: tok("--dim", "#7d8590"),
+    bgElev: tok("--bg-elev", "#161b22"),
+    purple: tok("--purple", "#bc8cff"),
+    border: tok("--border", "#30363d"),
+    bg: tok("--bg", "#0d1117"),
+  };
+}
+
+async function renderRayfinGraph() {
+  const host = $("#rf-graph-canvas");
+  if (!host) return;
+  // Cytoscape needs a laid-out, visible container to size/fit correctly.
+  // renderTabs() can call renderRayfin() while the Rayfin tab (or graph pane) is
+  // hidden; skip building then — opening the tab re-renders against a sized host.
+  // This also keeps the 435 KB engine truly lazy until the graph is on screen.
+  if (host.offsetParent === null || host.clientWidth === 0) return;
+  // Unchanged data + live instance: just reframe + re-sync selection, keep the layout.
+  const sig = rfGraphSignature();
+  if (rfCytoscape && rfGraphSig === sig && rfCytoscape.container() === host) {
+    rfCytoscape.resize();
+    rfApplyGraphSelection();
+    rfCytoscape.fit(undefined, 30);
+    return;
+  }
+  let cy;
+  try {
+    cy = await loadCytoscape();
+  } catch {
+    host.innerHTML =
+      '<div class="rf-empty">Graph view needs the bundled graph engine, which failed to load.</div>';
+    return;
+  }
+  if (rfModelView !== "graph" || !cy) return; // user switched away while loading
+  const { accent, text, dim, bgElev, purple, border } = rfGraphColors();
+  if (rfCytoscape) {
+    rfCytoscape.destroy();
+    rfCytoscape = null;
+  }
+  rfCytoscape = cy({
+    container: host,
+    elements: rfGraphElements(),
+    style: [
+      {
+        selector: "node",
+        style: {
+          "background-color": bgElev,
+          "border-width": 1,
+          "border-color": border,
+          label: "data(label)",
+          color: text,
+          "font-size": 11,
+          "text-valign": "center",
+          "text-halign": "center",
+          shape: "round-rectangle",
+          width: "label",
+          height: 28,
+          padding: "8px",
+        },
+      },
+      { selector: 'node[kind = "role"]', style: { "border-color": purple, "border-width": 2 } },
+      {
+        selector: "node:selected",
+        style: { "border-color": accent, "border-width": 2, color: accent },
+      },
+      {
+        selector: "edge",
+        style: {
+          width: 1.4,
+          "line-color": dim,
+          "target-arrow-color": dim,
+          "target-arrow-shape": "triangle",
+          "curve-style": "bezier",
+          label: "data(label)",
+          "font-size": 9,
+          color: dim,
+          "text-opacity": 0,
+          "text-rotation": "autorotate",
+          "text-background-color": bgElev,
+          "text-background-opacity": 1,
+          "text-background-padding": 2,
+        },
+      },
+      { selector: 'edge[kind = "many"]', style: { "line-style": "dashed" } },
+      { selector: "edge.shown", style: { "text-opacity": 1, "z-index": 10 } },
+    ],
+    wheelSensitivity: 0.2,
+  });
+  rfGraphSig = sig;
+  rfCytoscape.on("tap", "node", (evt) => selectRayfinEntity(evt.target.id(), { fromGraph: true }));
+  rfCytoscape.on("mouseover", "node", (evt) => rfUpdateEdgeLabels(evt.target));
+  rfCytoscape.on("mouseout", "node", () => rfUpdateEdgeLabels(null));
+  rfCytoscape.on("select unselect", "node", () => rfUpdateEdgeLabels(null));
+  rfApplyGraphSelection();
+  rfRunGraphLayout(rfCytoscape);
+}
+
+function downloadBlob(filename, blob) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.rel = "noopener";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
+}
+
+// Hand-rolled SVG export of the graph model (the cytoscape-svg plugin is GPLv3, so
+// it can't ship in this MIT project). Mirrors the on-screen styling and shows every
+// edge label, since an exported diagram is static. Pure string builder.
+function rfBuildGraphSvg(cy, colors) {
+  const xml = (s) =>
+    String(s).replace(
+      /[&<>"]/g,
+      (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c],
+    );
+  const bb = cy.elements().boundingBox({ includeLabels: false });
+  const pad = 24;
+  const w = Math.round(Math.max(1, bb.w) + pad * 2);
+  const h = Math.round(Math.max(1, bb.h) + pad * 2);
+  const dx = pad - bb.x1;
+  const dy = pad - bb.y1;
+  const p = [];
+  p.push(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">`,
+  );
+  p.push(`<rect x="0" y="0" width="${w}" height="${h}" fill="${colors.bg}"/>`);
+  p.push(
+    `<defs><marker id="rf-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="${colors.dim}"/></marker></defs>`,
+  );
+  cy.edges().forEach((edge) => {
+    const s = edge.sourceEndpoint();
+    const t = edge.targetEndpoint();
+    const dash = edge.data("kind") === "many" ? ' stroke-dasharray="5 4"' : "";
+    p.push(
+      `<line x1="${(s.x + dx).toFixed(1)}" y1="${(s.y + dy).toFixed(1)}" x2="${(t.x + dx).toFixed(1)}" y2="${(t.y + dy).toFixed(1)}" stroke="${colors.dim}" stroke-width="1.4"${dash} marker-end="url(#rf-arrow)"/>`,
+    );
+    const label = edge.data("label") || "";
+    if (label) {
+      const m = edge.midpoint();
+      const lx = m.x + dx;
+      const ly = m.y + dy;
+      const tw = label.length * 5.3 + 8;
+      p.push(
+        `<rect x="${(lx - tw / 2).toFixed(1)}" y="${(ly - 8).toFixed(1)}" width="${tw.toFixed(1)}" height="14" rx="2" fill="${colors.bgElev}"/>`,
+      );
+      p.push(
+        `<text x="${lx.toFixed(1)}" y="${(ly + 3).toFixed(1)}" fill="${colors.dim}" font-size="9" text-anchor="middle">${xml(label)}</text>`,
+      );
+    }
+  });
+  cy.nodes().forEach((node) => {
+    const c = node.position();
+    const nw = node.outerWidth();
+    const nh = node.outerHeight();
+    const selected = node.selected();
+    const role = node.data("kind") === "role";
+    const stroke = selected ? colors.accent : role ? colors.purple : colors.border;
+    const sw = selected || role ? 2 : 1;
+    const fg = selected ? colors.accent : colors.text;
+    p.push(
+      `<rect x="${(c.x + dx - nw / 2).toFixed(1)}" y="${(c.y + dy - nh / 2).toFixed(1)}" width="${nw.toFixed(1)}" height="${nh.toFixed(1)}" rx="6" fill="${colors.bgElev}" stroke="${stroke}" stroke-width="${sw}"/>`,
+    );
+    p.push(
+      `<text x="${(c.x + dx).toFixed(1)}" y="${(c.y + dy + 4).toFixed(1)}" fill="${fg}" font-size="11" text-anchor="middle">${xml(node.data("label"))}</text>`,
+    );
+  });
+  p.push("</svg>");
+  return p.join("");
+}
+
+async function rfExportGraph(format) {
+  closeRayfinExportMenu();
+  const cy = rfCytoscape;
+  if (!cy) return;
+  const colors = rfGraphColors();
+  cy.edges().addClass("shown"); // show every label in the export
+  try {
+    if (format === "svg") {
+      const svg = rfBuildGraphSvg(cy, colors);
+      downloadBlob("rayfin-data-model.svg", new Blob([svg], { type: "image/svg+xml" }));
+    } else {
+      const blob = cy.png({ output: "blob", full: true, scale: 2, bg: colors.bg });
+      downloadBlob("rayfin-data-model.png", blob);
+    }
+  } catch {}
+  cy.edges().removeClass("shown");
+  rfUpdateEdgeLabels(null); // restore the interactive (selection-based) labels
+}
+
+function openRayfinExportMenu() {
+  closeScriptsMenu();
+  closeTabMore();
+  closePinnedMore();
+  closeProjectMenu();
+  closeRayfinSwitchMenu();
+  const menu = $("#rf-export-menu");
+  if (!menu) return;
+  menu.classList.remove("hidden");
+  $("#rf-graph-export")?.setAttribute("aria-expanded", "true");
+  clampPopover(menu);
+}
+
+function closeRayfinExportMenu() {
+  const menu = $("#rf-export-menu");
+  if (menu) menu.classList.add("hidden");
+  $("#rf-graph-export")?.setAttribute("aria-expanded", "false");
 }
 
 function renderRayfin() {
-  const r = state.rayfin;
   const panel = $("#tab-rayfin");
   if (!panel) return;
+  const intro = $("#rf-intro");
+  const detected = $("#rf-detected");
+  const hasProject = !!state.detection?.hasProject;
+  // No Node project at all: show the create-new-project intro instead of the
+  // CLI-driven dashboard (there is nothing to inspect yet).
+  if (!hasProject) {
+    if (intro) {
+      intro.classList.remove("hidden");
+      const linksEl = $("#rf-intro-links");
+      if (linksEl) {
+        linksEl.innerHTML = RAYFIN_LINKS.map((l) => rfLink(l.label, l.url, l.icon)).join("");
+      }
+    }
+    if (detected) detected.classList.add("hidden");
+    // Drop any prior project's graph/selection so nothing leaks if a Rayfin
+    // project is opened next.
+    resetRayfinTransient();
+    return;
+  }
+  if (intro) intro.classList.add("hidden");
+  if (detected) detected.classList.remove("hidden");
+
+  const r = state.rayfin;
   if (!r || r.detected === false) {
     $("#rf-app-name").textContent = "Rayfin";
     $("#rf-dialect").classList.add("hidden");
-    for (const id of ["#rf-env", "#rf-workspace", "#rf-model", "#rf-functions", "#rf-docs"]) {
+    for (const id of ["#rf-env", "#rf-workspace", "#rf-functions", "#rf-docs"]) {
       const el = $(id);
       if (el) el.innerHTML = '<div class="rf-empty">Loading…</div>';
     }
+    // #rf-model is a structural container (segmented toggle + list/graph panes),
+    // so only replace the list pane's content — wiping #rf-model would destroy
+    // the children renderRayfinModel() needs and leave the section stuck loading.
+    resetRayfinTransient();
+    const ml = $("#rf-model-list");
+    if (ml) ml.innerHTML = '<div class="rf-empty">Loading…</div>';
+    $("#rf-model-count")?.classList.add("hidden");
     return;
   }
 
@@ -773,15 +1365,8 @@ function renderRayfin() {
   // Fabric workspace & deployment
   const list = r.deployments?.list || [];
   const active = list.find((d) => d.active) || null;
-  const sw = $("#rf-switch");
-  sw.innerHTML =
-    list
-      .map(
-        (d) =>
-          `<option value="${esc(d.name)}"${d.active ? " selected" : ""}>${esc(d.name)}</option>`,
-      )
-      .join("") || '<option value="">— none —</option>';
-  sw.disabled = list.length === 0;
+  rayfinDeployments = list;
+  renderRayfinSwitch();
   const ws = $("#rf-workspace");
   if (!active) {
     ws.innerHTML =
@@ -802,14 +1387,13 @@ function renderRayfin() {
 
   // Data model
   const entities = r.entities || [];
+  rfEntities = entities;
   const count = $("#rf-model-count");
   if (entities.length) {
     count.textContent = `${entities.length} ${entities.length === 1 ? "type" : "types"}`;
     count.classList.remove("hidden");
   } else count.classList.add("hidden");
-  $("#rf-model").innerHTML = entities.length
-    ? `<div class="rf-entities">${entities.map(renderRayfinEntity).join("")}</div>`
-    : '<div class="rf-empty">No data model found. Define entities in <b>rayfin/data/schema.ts</b>.</div>';
+  renderRayfinModel();
 
   // Functions & connectors
   const fns = r.functions || [];
@@ -828,10 +1412,11 @@ function renderRayfin() {
   const agentMsg = r.hasAgentFiles
     ? '<span class="rf-chip ok">Agent files present</span>'
     : '<span class="rf-chip muted">Agent files not set up</span>';
-  $("#rf-docs").innerHTML = `<div class="rf-links">
-      ${rfLink("Rayfin docs", r.docsUrl || "https://github.com/microsoft/rayfin", "oct-checklist")}
-    </div>
-    <div class="rf-kv"><span>Agent setup</span><div>${agentMsg}</div></div>`;
+  const links = (r.links && r.links.length ? r.links : RAYFIN_LINKS)
+    .map((l) => rfLink(l.label, l.url, l.icon))
+    .join("");
+  $("#rf-docs").innerHTML = `<div class="rf-kv"><span>Agent setup</span><div>${agentMsg}</div></div>
+    <div class="rf-links rf-docs-links">${links}</div>`;
 }
 
 // ---- Tasks (unified pinned lanes + scripts) -------------------------------
@@ -2395,6 +2980,8 @@ document.addEventListener("click", (e) => {
   const target = /** @type {Element | null} */ (e.target);
   if (!target?.closest(".menu-wrap")) closeScriptsMenu();
   if (!target?.closest("#project-wrap")) closeProjectMenu();
+  if (!target?.closest("#rf-switch-wrap")) closeRayfinSwitchMenu();
+  if (!target?.closest("#rf-export-wrap")) closeRayfinExportMenu();
   if (!target?.closest(".tab-more-wrap")) closeTabMore();
   if (!target?.closest(".pinned-more-wrap")) closePinnedMore();
 });
@@ -2402,6 +2989,8 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
     closeScriptsMenu();
     closeProjectMenu();
+    closeRayfinSwitchMenu();
+    closeRayfinExportMenu();
     closeTabMore();
     closePinnedMore();
   }
@@ -2856,6 +3445,19 @@ $("#rf-refresh").addEventListener("click", async (e) => {
   }
 });
 
+// Intro state: hand Copilot the canonical "scaffold a new Rayfin app" prompt.
+$("#rf-create")?.addEventListener("click", async (e) => {
+  const btn = e.currentTarget;
+  setDepsBusy(btn, true);
+  try {
+    const r = await api("/api/rayfin/start", {});
+    if (r && r.ok === false) toast(r.reason || "Couldn't start a Rayfin project.");
+    else toast("Sent the Rayfin setup prompt to Copilot.");
+  } finally {
+    setDepsBusy(btn, false);
+  }
+});
+
 // Delegated handler for every CLI button (data-rf-cli="dev start"). Streams to
 // the Console tab via the rayfin:<cmd> lane.
 $("#tab-rayfin").addEventListener("click", async (e) => {
@@ -2867,10 +3469,44 @@ $("#tab-rayfin").addEventListener("click", async (e) => {
   if (r && r.started === false && r.reason) toast(r.reason);
 });
 
-$("#rf-switch").addEventListener("change", async (e) => {
-  const name = e.currentTarget.value;
-  if (!name) return;
-  await api("/api/rayfin/switch", { name });
+$("#rf-switch-toggle").addEventListener("click", (e) => {
+  e.stopPropagation();
+  if ($("#rf-switch-toggle").disabled) return;
+  if ($("#rf-switch-menu").classList.contains("hidden")) openRayfinSwitchMenu();
+  else closeRayfinSwitchMenu();
+});
+
+// Data model: List | Graph toggle, entity selection, graph fit.
+$("#rf-model-view").addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-view]");
+  if (btn) setRayfinModelView(btn.dataset.view);
+});
+$("#rf-model-list").addEventListener("click", (e) => {
+  const row = e.target.closest(".rf-entity-row");
+  if (row) selectRayfinEntity(row.dataset.entity);
+});
+$("#rf-model-list").addEventListener("keydown", (e) => {
+  if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+  const entities = rfEntities;
+  if (!entities.length) return;
+  e.preventDefault();
+  const idx = entities.findIndex((x) => x.name === rfSelectedEntity);
+  const next =
+    e.key === "ArrowDown" ? Math.min(entities.length - 1, idx + 1) : Math.max(0, idx - 1);
+  selectRayfinEntity(entities[next].name);
+  $("#rf-model-list").querySelector(".rf-entity-row.active")?.focus();
+});
+$("#rf-graph-fit").addEventListener("click", () => {
+  if (rfCytoscape) rfCytoscape.fit(undefined, 20);
+});
+$("#rf-graph-export").addEventListener("click", (e) => {
+  e.stopPropagation();
+  if ($("#rf-export-menu").classList.contains("hidden")) openRayfinExportMenu();
+  else closeRayfinExportMenu();
+});
+$("#rf-export-menu").addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-export]");
+  if (btn) rfExportGraph(btn.dataset.export);
 });
 
 // ---- Settings panel -------------------------------------------------------

@@ -32,12 +32,14 @@ inspiration: [coffilot](https://github.com/jdubois/coffilot). Full design in
     the header project selector, see gotcha below),
     `rayfin.ts` (Microsoft Rayfin BaaS dashboard: detection + offline read of
     `rayfin/` files — rayfin.yml / .deployments.json / .env / dab-config.json /
-    schema.ts — + allow-listed `rayfin` CLI lanes; **no agent actions**, see below).
+    schema.ts — + allow-listed `rayfin` CLI lanes; one deliberate agent action
+    (`rayfin_new_project`), see below).
 - `types/copilot-sdk.d.ts` — ambient shim for `@github/copilot-sdk/extension` so `tsc`
   resolves it in CI (the real package only exists inside the Copilot app).
 - `public/` — vanilla HTML/CSS/JS UI (Info / Preview / Rayfin / Tests / Problems /
   Dependencies / Debugger / Console tabs — that's the **default order**; Rayfin is
-  **conditional**, shown only when a Rayfin project is detected, like Preview/Tests/Problems;
+  **conditional**, shown when a Rayfin project is detected (like Preview/Tests/Problems)
+  **or** when there's no Node project at all (the create-new-project intro state);
   users reorder/hide tabs and toggle
   auto-run via a gear-launched **Settings** panel, `#tab-settings`, which is not itself
   a tab in `#tabs`),
@@ -52,6 +54,9 @@ inspiration: [coffilot](https://github.com/jdubois/coffilot). Full design in
   snout/tail isn't clipped. The API-endpoint row keeps `oct-server` (semantically a server,
   not the brand).
   `public/app.js` stays JS, type-checked via `tsconfig.client.json` (`checkJs`).
+  Lane/action buttons use `.lane-btn`, which carries a fixed `min-height` + `line-height: 1`
+  and a 14×14 `.oi` so icon and text-only buttons line up at the same height — don't
+  reintroduce per-button height drift when adding new ones.
   `public/preview-capture.js` is the capture bridge injected into the proxied preview;
   `public/vendor/snapdom.min.js` is the vendored rasterizer it uses (see gotcha below).
 - `test/` — Vitest specs (`core.test.ts`, `deps.test.ts`, `info.test.ts`,
@@ -182,13 +187,23 @@ inspiration: [coffilot](https://github.com/jdubois/coffilot). Full design in
   - Limits: proxy fidelity is scoped to dogfooding the project's own Astro site —
     dev servers that hard-code their absolute origin, exotic auth/cookies, or non-HTTP
     HMR may not round-trip; the manual URL bar + open-external still work.
-- **Vendored client lib exception**: the UI is otherwise dependency-free vanilla JS, but
-  `public/vendor/snapdom.min.js` (SnapDOM, MIT, self-contained, no sub-deps) is a
-  deliberate, user-approved exception — it's the in-page rasterizer for the capture flow
-  above. It's git-ignored from Biome (`!public/vendor` in `biome.json`) and not
-  type-checked (`tsconfig.client.json` only includes `public/app.js`). Keep new client
-  libs out unless there's an equally strong reason; if you add one, vendor a single
-  self-contained file here and document why.
+- **Vendored client libs (deliberate exceptions)**: the UI is otherwise dependency-free
+  vanilla JS, but three self-contained MIT files live under `public/vendor/`:
+  `snapdom.min.js` (SnapDOM — in-page rasterizer for the capture flow above),
+  `cytoscape.min.js` (Cytoscape.js v3.x — graph engine for the Rayfin data-model **Graph**
+  view, **lazy-loaded** via an injected `<script>` only when Graph is first opened, so the
+  ~435 KB never blocks canvas startup) and `cytoscape-fcose.min.js` (the fcose
+  force-directed layout extension, bundled self-contained with its cose-base/layout-base
+  deps via esbuild; lazy-loaded right after the core and registered with `cytoscape.use()`,
+  with a built-in `cose` fallback if it fails to load). All are git-ignored from Biome
+  (`!public/vendor` in `biome.json`) and not type-checked (`tsconfig.client.json` only includes
+  `public/app.js`);   each carries a provenance header (source/version/license). Refresh cytoscape by
+  re-copying its dist from the `cytoscape` `devDependencies` entry; refresh fcose by
+  re-bundling the `cytoscape-fcose` devDependency (`esbuild <entry-in-project>.mjs --bundle
+  --minify --format=iife` with an entry that does `import fcose from "cytoscape-fcose";
+  window.cytoscapeFcose = fcose;`); snapdom is vendored
+  by hand from its upstream release (no devDependency). Keep new client libs out unless there's an equally strong reason; if you add
+  one, vendor a single self-contained file here and document why.
 - **Settings persist server-side** in `~/.cockpit/settings.json` (keyed by project
   path), NOT in iframe `localStorage` — each canvas open gets a fresh loopback port,
   changing the origin and wiping `localStorage`. See `src/settings.ts`. The schema
@@ -330,16 +345,31 @@ inspiration: [coffilot](https://github.com/jdubois/coffilot). Full design in
   (`@microsoft/rayfin-mcp`) + CLI + agent skills, so duplicating `rayfin` commands as
   `rayfin_*` agent actions would be redundant. Instead the tab reads `rayfin/` files
   offline (`readRayfinState`: rayfin.yml → config, `.deployments.json` → Fabric workspace +
-  Open-app/Open-Fabric links + switcher, `dab-config.json`/`schema.ts` → data-model viewer,
+  `dab-config.json`/`schema.ts` → data-model viewer (a **List | Graph** toggle: a two-pane
+  list/detail on the List side, a Cytoscape node-link diagram of entities + relations on
+  the Graph side — see the vendored-lib note above),
   `.env` → public vars, `functions/` + connectors) and its buttons run **allow-listed**
   `rayfin` CLI commands as Console **lanes** (`rayfin:<cmd>`, via `npm exec -- rayfin …`),
-  streamed like build/lint. `validateRayfinArgs` gates an **exact-command** allow-list
+  streamed like build/lint. The Fabric-workspace switcher is a **custom popover dropdown**
+  (`#rf-switch-toggle` + `#rf-switch-menu`, mirroring the project selector) — not a native
+  `<select>` — so it matches the rest of the chrome. `validateRayfinArgs` gates an
+  **exact-command** allow-list
   (`SAFE_ARG` regex + `ALLOWED_COMMANDS` set of full argv shapes) — not just a first-verb
   check — because the same-origin preview proxy makes `/api/rayfin/cli` reachable from
   proxied dev-server content; `up switch <name>` is separate (the target is validated
-  against the known deployment list, then spawned as one argv element). The **only** agent touchpoint is a read-only `rayfin` block added to the
-  existing `get_status` (detected? dialect, auth methods, signed-in, active workspace,
-  app/portal URLs) — detection state, not a CLI duplicate. Detection (`detectRayfin`) is
+  against the known deployment list, then spawned as one argv element).
+  **Two deliberate agent touchpoints** (everything else stays human-facing): (1) a
+  read-only `rayfin` block on `get_status` (detected? dialect, auth methods, signed-in,
+  active workspace, app/portal URLs) — detection state, not a CLI duplicate; and (2) the
+  **`rayfin_new_project`** action (`actions.ts`) — **always available, even with no project
+  open** — which calls `controller.startRayfinProject()` →
+  `sendToChat(<src/prompts/rayfin-start.md>)`, handing Copilot the canonical scaffold
+  prompt. The same flow backs `POST /api/rayfin/start`, wired to the **intro/empty state**
+  the tab shows when there's **no Node project at all** (`#rf-intro`: what Rayfin is + a
+  "Create new Rayfin project" button + docs links; the CLI-driven `#rf-detected` block is
+  hidden). Tab visibility: shown when a Rayfin project is detected **or** when there's no
+  project at all; hidden for a non-Rayfin Node project (where only the agent tool applies).
+  Detection (`detectRayfin`) is
   cheap (rayfin.yml or `@microsoft/rayfin*` deps → `Detection.rayfin`); the full dashboard
   is lazy (`/api/rayfin/state`, cached in `controller._rayfin`, invalidated on detect +
   after every CLI lane). Never surface secrets — only public IDs/URLs from

@@ -44,6 +44,8 @@
     "@types/node": "^22.10.0",
     "@vitest/coverage-v8": "^4.1.9",
     "astro": "^6.4.8",
+    "cytoscape": "^3.34.0",
+    "cytoscape-fcose": "^2.2.0",
     "sharp": "^0.35.2",
     "typescript": "^6.0.3",
     "vitest": "^4.1.9"

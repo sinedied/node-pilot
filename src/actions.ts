@@ -483,6 +483,13 @@ export function buildActions(controller: Controller): ActionDefinition[] {
         "Get the debugger status: stopped|starting|running|paused, the target, the current pause (reason + stack) and the breakpoint list.",
       handler: () => controller.debugGetState(),
     },
+    // ---- Rayfin (Microsoft Fabric Apps) ------------------------------------
+    {
+      name: "rayfin_new_project",
+      description:
+        "Start a brand-new Rayfin project (Microsoft Fabric Apps backend-as-a-service). Available even when no project is open. Hands Copilot the canonical setup prompt (pick a template, check prerequisites, scaffold with create-rayfin, then plan the data model). Use this when the user asks to create / scaffold / bootstrap a new Rayfin or Fabric app.",
+      handler: async () => controller.startRayfinProject(),
+    },
   ];
 
   // Anchor to the session's working directory before every action runs.
