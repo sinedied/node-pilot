@@ -8,7 +8,7 @@ import { watch as fsWatch, statSync, type FSWatcher } from "node:fs";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { detect } from "./detect.ts";
 import { run, start } from "./process-runner.ts";
-import { runScript as pmRunScript } from "./pm.ts";
+import { runScript as pmRunScript, supportsAuditFix } from "./pm.ts";
 import {
   resolveLane,
   resolveDev,
@@ -37,7 +37,7 @@ import {
 } from "./debug.ts";
 import { loadSettings, saveSettings, KNOWN_TABS } from "./settings.ts";
 import { computeStats } from "./info.ts";
-import { readRayfinState, validateRayfinArgs, rayfinArgv } from "./rayfin.ts";
+import { readRayfinState, validateRayfinArgs, rayfinArgv, rayfinWorkspaceFlag } from "./rayfin.ts";
 import { enumerateProjects } from "./projects.ts";
 import * as deps from "./deps.ts";
 import type { SafeUpdateOptions, SafeUpdateResult } from "./deps.ts";
@@ -121,6 +121,19 @@ interface LaneRunResult {
   ok: boolean;
   reason?: string;
   exitCode?: number;
+}
+
+// Outcome of the Security "Fix with Copilot" flow: whether the package manager's
+// own `audit fix` ran, whether it had to be rolled back, how many groups it
+// resolved, how many remain, and whether the remainder was handed to Copilot.
+export interface AuditFixResult {
+  ok: boolean;
+  reason?: string;
+  ran?: boolean;
+  rolledBack?: boolean;
+  fixed?: number;
+  remaining?: number;
+  escalated?: boolean;
 }
 
 // Live test-watch session. For file-based runners (vitest/jest) the JSON report
@@ -1487,14 +1500,52 @@ export class Controller {
     this.log(`Asked Copilot to update Cockpit.js to v${info.latestVersion}.`);
     return { ok: true };
   }
-  async sendCopilotAuditFix(): Promise<{ ok: boolean; reason?: string }> {
+  async sendCopilotAuditFix(): Promise<AuditFixResult> {
+    // Establish an audit baseline so we know what was fixable to begin with.
     if (!this.deps.audit) await this.runAudit().catch(() => {});
-    const vulnerabilities = this.deps.audit?.vulnerabilities || [];
+    let vulnerabilities = this.deps.audit?.vulnerabilities || [];
     if (!vulnerabilities.length) return { ok: false, reason: "No known vulnerabilities." };
-    const prompt = buildDepsAuditFixPrompt({ vulnerabilities });
+
+    const d = this.detection;
+    const fixableBefore = vulnerabilities.filter((v) => v.fixAvailable).length;
+
+    // Step 1 — try the package manager's own `audit fix` first, verify-gated with
+    // auto-rollback (npm/pnpm/yarn; bun has none). Only worth running if there's
+    // something it could fix in place.
+    let ran = false;
+    let rolledBack = false;
+    if (d?.hasProject && supportsAuditFix(d.pm) && fixableBefore > 0) {
+      const r = await deps.safeAuditFix(this);
+      ran = !!r.ran;
+      rolledBack = !!r.rolledBack;
+      // safeAuditFix refreshed this.deps.audit (or restored the baseline on rollback).
+      vulnerabilities = this.deps.audit?.vulnerabilities || [];
+    }
+
+    const remaining = vulnerabilities;
+    const remainingFixable = remaining.filter((v) => v.fixAvailable).length;
+    const fixed = Math.max(0, fixableBefore - remainingFixable);
+
+    // Step 2 — if `audit fix` cleared everything actionable, we're done. Anything
+    // left has no automatic fix, so a Copilot bump can't help it either.
+    if (ran && !rolledBack && remainingFixable === 0) {
+      this.log(
+        `Audit fix resolved ${fixed} vulnerability group(s); ${remaining.length} remain with no automatic fix.`,
+      );
+      return { ok: true, ran, rolledBack, fixed, remaining: remaining.length, escalated: false };
+    }
+
+    // Step 3 — escalate what remains (or the full set, if audit fix rolled back or
+    // wasn't available) to Copilot.
+    const prompt = buildDepsAuditFixPrompt({ vulnerabilities: remaining });
     await this.sendToChat(prompt);
-    this.log(`Asked Copilot to fix ${vulnerabilities.length} vulnerability group(s).`);
-    return { ok: true };
+    const lead = !ran
+      ? "Asked"
+      : rolledBack
+        ? "Audit fix broke the app and was rolled back; asked"
+        : `Audit fix resolved ${fixed}; asked`;
+    this.log(`${lead} Copilot to fix ${remaining.length} vulnerability group(s).`);
+    return { ok: true, ran, rolledBack, fixed, remaining: remaining.length, escalated: true };
   }
 
   // ---- Rayfin (Microsoft Rayfin BaaS dashboard) ---------------------------
@@ -1590,6 +1641,25 @@ export class Controller {
       "rayfin:up:switch",
       `rayfin up switch ${target}`,
       rayfinArgv(d.pm, ["up", "switch", target]),
+    );
+  }
+
+  // Deploy to Fabric (`rayfin up`). When `workspace` is given (the "not deployed
+  // yet" flow) it targets a specific Fabric workspace by name / GUID / portal URL
+  // — the value is passed as a single argv element (no shell, can't inject), so
+  // it bypasses the generic SAFE_ARG allow-list, like the `up switch` path. `-y`
+  // auto-accepts confirmations since the Console lane is non-interactive.
+  async deployRayfinWorkspace(workspace: unknown): Promise<{ ok: boolean; reason?: string }> {
+    const d = this.detection;
+    if (!d?.hasProject || !d.rayfin) return { ok: false, reason: "Not a Rayfin project." };
+    const value = (typeof workspace === "string" ? workspace : "").trim();
+    const argv = ["up"];
+    if (value) argv.push(rayfinWorkspaceFlag(value), value);
+    argv.push("-y");
+    return this.runRayfinLane(
+      "rayfin:up",
+      value ? `rayfin up (${value})` : "rayfin up",
+      rayfinArgv(d.pm, argv),
     );
   }
 

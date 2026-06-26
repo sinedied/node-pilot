@@ -1385,8 +1385,12 @@ function renderRayfin() {
   renderRayfinSwitch();
   const ws = $("#rf-workspace");
   if (!active) {
-    ws.innerHTML =
-      '<div class="rf-empty">No deployments yet. Use <b>Deploy</b> to provision a Fabric workspace.</div>';
+    ws.innerHTML = `<div class="rf-deploy-form">
+      <input type="text" id="rf-deploy-workspace" class="rf-input"
+        placeholder="Workspace name, ID, or portal URL"
+        aria-label="Target Fabric workspace (name, ID, or portal URL)" />
+    </div>
+    <div class="rf-empty">No deployment yet. Enter a target Fabric workspace (display name, GUID, or portal URL) and hit <b>Deploy</b> — or leave it blank to use your default workspace.</div>`;
   } else {
     const when = active.deployedAt ? new Date(active.deployedAt).toLocaleString() : "—";
     ws.innerHTML = `<div class="rf-card">
@@ -3444,8 +3448,31 @@ $("#deps-audit-fix").addEventListener("click", async (e) => {
   setDepsBusy(btn, true);
   try {
     const r = await api("/api/deps/audit-fix", {});
-    if (r?.ok) toast("Asked Copilot to fix vulnerabilities. Watch the chat.");
-    else if (r?.reason) toast(r.reason);
+    if (!r?.ok) {
+      if (r?.reason) toast(r.reason);
+      return;
+    }
+    const fixed = r.fixed || 0;
+    const remaining = r.remaining || 0;
+    if (r.escalated) {
+      if (r.rolledBack) {
+        toast(
+          "Audit fix would break the app — rolled back. Asked Copilot to fix it. Watch the chat.",
+        );
+      } else if (r.ran && fixed > 0) {
+        toast(
+          `Audit fix resolved ${fixed}; asked Copilot for the remaining ${remaining}. Watch the chat.`,
+        );
+      } else {
+        toast("Asked Copilot to fix vulnerabilities. Watch the chat.");
+      }
+    } else {
+      const lead =
+        fixed > 0
+          ? `Audit fix resolved ${fixed} vulnerability group(s).`
+          : "Vulnerabilities fixed.";
+      toast(remaining > 0 ? `${lead} ${remaining} remain with no automatic fix.` : lead);
+    }
   } finally {
     setDepsBusy(btn, false);
   }
@@ -3484,6 +3511,17 @@ $("#tab-rayfin").addEventListener("click", async (e) => {
   const args = btn.dataset.rfCli.split(/\s+/).filter(Boolean);
   if (!args.length) return;
   const r = await api("/api/rayfin/cli", { args });
+  if (r && r.started === false && r.reason) toast(r.reason);
+});
+
+// Deploy button. Picks up the optional workspace target from the not-deployed
+// empty-state input; blank deploys to the default workspace. The server picks
+// the right --workspace/--workspace-id/--workspace-uri flag by value shape.
+$("#tab-rayfin").addEventListener("click", async (e) => {
+  if (!e.target.closest("[data-rf-deploy]")) return;
+  const input = $("#rf-deploy-workspace");
+  const workspace = input ? input.value.trim() : "";
+  const r = await api("/api/rayfin/deploy", { workspace });
   if (r && r.started === false && r.reason) toast(r.reason);
 });
 

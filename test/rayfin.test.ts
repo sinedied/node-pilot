@@ -5,7 +5,30 @@ import { afterEach, describe, expect, it } from "vitest";
 import { mkdtemp, writeFile, mkdir, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { parseSchema, readRayfinState } from "../src/rayfin.ts";
+import { parseSchema, readRayfinState, rayfinWorkspaceFlag } from "../src/rayfin.ts";
+
+describe("rayfinWorkspaceFlag", () => {
+  it("maps a portal URL to --workspace-uri", () => {
+    expect(rayfinWorkspaceFlag("https://app.fabric.microsoft.com/groups/abc/list")).toBe(
+      "--workspace-uri",
+    );
+    expect(rayfinWorkspaceFlag("HTTP://example.com")).toBe("--workspace-uri");
+  });
+  it("maps a bare GUID to --workspace-id", () => {
+    expect(rayfinWorkspaceFlag("11111111-2222-3333-4444-555555555555")).toBe("--workspace-id");
+    expect(rayfinWorkspaceFlag("AABBCCDD-1234-5678-9ABC-DEF012345678")).toBe("--workspace-id");
+  });
+  it("maps a display name (or anything else) to --workspace", () => {
+    expect(rayfinWorkspaceFlag("My Workspace")).toBe("--workspace");
+    expect(rayfinWorkspaceFlag("prod")).toBe("--workspace");
+    // GUID-like-but-not-a-GUID stays a name
+    expect(rayfinWorkspaceFlag("1234")).toBe("--workspace");
+  });
+  it("trims surrounding whitespace before detecting the shape", () => {
+    expect(rayfinWorkspaceFlag("  https://x.test/  ")).toBe("--workspace-uri");
+    expect(rayfinWorkspaceFlag("  11111111-2222-3333-4444-555555555555 ")).toBe("--workspace-id");
+  });
+});
 
 describe("parseSchema", () => {
   it("parses the canonical one-decorator-per-line shape", () => {

@@ -10,6 +10,8 @@ import {
   audit as pmAudit,
   add as pmAdd,
   install as pmInstall,
+  auditFix as pmAuditFix,
+  supportsAuditFix,
   lockfileFor,
 } from "./pm.ts";
 import { resolveBuild, resolveLint, resolveTypecheck, resolveTest } from "./lanes.ts";
@@ -613,6 +615,95 @@ function failUpdateLane(controller: Controller): void {
     lane.endedAt = Date.now();
   }
   controller.broadcast({ type: "lane:end", lane: "update", status: "failed", exitCode: 1 });
+}
+
+function endUpdateLane(controller: Controller, passed: boolean): void {
+  const lane = controller.lanes.update;
+  if (lane) {
+    lane.status = passed ? "passed" : "failed";
+    lane.exitCode = passed ? 0 : 1;
+    lane.endedAt = Date.now();
+  }
+  controller.broadcast({
+    type: "lane:end",
+    lane: "update",
+    status: passed ? "passed" : "failed",
+    exitCode: passed ? 0 : 1,
+  });
+}
+
+export interface SafeAuditFixResult {
+  ok: boolean; // ran to completion without an unexpected error
+  reason?: string; // set when ok=false
+  ran?: boolean; // the package manager's audit-fix command actually executed
+  rolledBack?: boolean; // audit fix broke the verify suite and was reverted
+  brokeAt?: string; // verify step that failed (when rolledBack)
+}
+
+// Run `<pm> audit fix` (semver-compatible only — never the breaking `--force`)
+// behind the same verify + auto-rollback guarantee as safeUpdate: if the fix
+// breaks build/lint/test we restore the pre-fix manifest + lockfile. Refreshes
+// controller.deps.audit so the caller can see what (if anything) remains. Only
+// meaningful when supportsAuditFix(pm); returns { ran: false } otherwise.
+export async function safeAuditFix(controller: Controller): Promise<SafeAuditFixResult> {
+  const d = controller.detection;
+  if (!d?.hasProject) return { ok: false, reason: "No Node.js project detected." };
+  if (!supportsAuditFix(d.pm)) return { ok: true, ran: false };
+
+  const lane = controller.lanes.update;
+  const label = "Fix vulnerabilities";
+  if (lane) {
+    lane.status = "running";
+    lane.label = label;
+    lane.exitCode = null;
+    lane.output = [];
+    lane.startedAt = Date.now();
+    lane.endedAt = null;
+  }
+  controller.broadcast({ type: "lane:start", lane: "update", label });
+  const log: Log = (chunk) => {
+    if (lane) pushCapped(lane.output, chunk);
+    controller.broadcast({ type: "lane:data", lane: "update", chunk });
+  };
+
+  const manifestPath = path.join(controller.cwd, "package.json");
+  const lockName = lockfileFor(d.pm);
+  const lockPath = path.join(controller.cwd, lockName);
+  const snap: Snapshot = {
+    manifest: await readText(manifestPath),
+    lock: await readText(lockPath),
+  };
+  const steps = defaultVerify(d);
+
+  try {
+    const argv = pmAuditFix(d.pm);
+    log(`▶ Running ${argv.join(" ")}…\n`);
+    // `npm audit fix` exits non-zero when vulnerabilities remain even though it
+    // applied what it could, so the exit code isn't a failure signal here — the
+    // verify suite is the real gate on whether the fix broke the app.
+    await run(argv, { cwd: controller.cwd, onData: log });
+
+    log(`\nVerify steps: ${steps.join(", ") || "(none)"}\n`);
+    const verified = await verifyAll(controller, steps, log);
+    if (!verified.ok) {
+      log(`\n✗ audit fix broke "${verified.step}". Rolling back…\n`);
+      await restore(controller, snap, manifestPath, lockPath, log);
+      await runAudit(controller).catch(() => {});
+      endUpdateLane(controller, false);
+      return { ok: true, ran: true, rolledBack: true, brokeAt: verified.step };
+    }
+
+    log("\n✓ audit fix verified. Re-auditing…\n");
+    await runAudit(controller).catch(() => {});
+    await listOutdated(controller).catch(() => {});
+    endUpdateLane(controller, true);
+    return { ok: true, ran: true, rolledBack: false };
+  } catch (err) {
+    await restore(controller, snap, manifestPath, lockPath).catch(() => {});
+    await runAudit(controller).catch(() => {});
+    failUpdateLane(controller);
+    return { ok: false, reason: err instanceof Error ? err.message : String(err) };
+  }
 }
 
 // Restore package.json + lockfile to the state captured before the last update.

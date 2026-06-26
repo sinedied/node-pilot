@@ -324,8 +324,16 @@ inspiration: [coffilot](https://github.com/jdubois/coffilot). Full design in
     **new high/critical** advisory.
   - **Security section**: severity pills live in the section header; per-package vulnerability table
     (severity, range, fix target/major, advisory links from npm `via[].url`, parsed by exported
-    `parseAudit()`). **Fix with Copilot** (`/api/deps/audit-fix` → `sendCopilotAuditFix()` →
-    `buildDepsAuditFixPrompt`) prompts the agent to bump fixable packages and report the unfixable ones.
+    `parseAudit()`). **Fix with Copilot** (`/api/deps/audit-fix` → `sendCopilotAuditFix()`) is an
+    **`audit fix`-first, verify-gated** orchestrator: if the PM supports it (`supportsAuditFix()`:
+    npm/pnpm/yarn, **not bun**) and there are fixable advisories, it runs `deps.safeAuditFix()` —
+    snapshot manifest+lock, stream `pm.auditFix(pm)` (semver-safe, **never `--force`**) to the
+    **"update" lane**, run `defaultVerify()` (build+lint+test); **auto-rollback** if any step breaks
+    (mirrors `update_dependencies`). It then re-audits and **only escalates to Copilot for what
+    remains** (`buildDepsAuditFixPrompt` over the still-fixable vulns); if `audit fix` resolved
+    everything it does **not** ping chat. `npm audit fix` exits non-zero when vulns remain even on
+    success, so the **verify suite — not the exit code — is the gate.** The richer result
+    (`{ok,ran,rolledBack,fixed,remaining,escalated}`) drives the `#deps-audit-fix` toasts.
   - `defaultVerify()` is **build + lint + test** (no typecheck — the Problems tab covers types).
     The in-process `safeUpdate()` loop stays as the engine the `update_dependencies` action calls;
     the buttons no longer run it directly — they hand off to the agent.
@@ -366,6 +374,15 @@ inspiration: [coffilot](https://github.com/jdubois/coffilot). Full design in
   check — because the same-origin preview proxy makes `/api/rayfin/cli` reachable from
   proxied dev-server content; `up switch <name>` is separate (the target is validated
   against the known deployment list, then spawned as one argv element).
+  **Deploy** (`POST /api/rayfin/deploy` → `deployRayfinWorkspace()`): the **not-deployed**
+  empty state renders a workspace input (`#rf-deploy-workspace`); its value picks the `rayfin
+  up` flag by **shape** (`rayfinWorkspaceFlag()`: portal URL → `--workspace-uri`, bare GUID →
+  `--workspace-id`, else display name → `--workspace`) and is passed as a **single argv
+  element** (injection-safe), so — like `up switch` — it bypasses the generic `SAFE_ARG`
+  allow-list (which can't express names-with-spaces). Blank input redeploys to the default
+  workspace. Deploys always append **`-y`** because the Console lane is **non-interactive**
+  (would otherwise hang on the confirmation prompt). The header Deploy button (`data-rf-deploy`)
+  and the empty-state input share this one endpoint.
   **Two deliberate agent touchpoints** (everything else stays human-facing): (1) a
   read-only `rayfin` block on `get_status` (detected? dialect, auth methods, signed-in,
   active workspace, app/portal URLs) — detection state, not a CLI duplicate; and (2) the
@@ -601,7 +618,11 @@ handoffs appear (they'd want their own treatment rather than diluting the gradie
   `.copilot-btn`, `.fix-btn`, `.segmented .on`). **No `translateY` push-down** — GitHub
   shifts the background, it does not move the button.
 - **Filled buttons darken on hover** (GitHub behavior): `.lane-btn.primary` and
-  `.copilot-btn` use `brightness(.96)`, not a lighten.
+  `.copilot-btn` use `brightness(.96)`, not a lighten. **Gotcha:** the generic
+  `.lane-btn:hover` grey-`--surface-hover` rule and `.lane-btn.primary:hover{filter:…}` have
+  **equal specificity**, so the generic rule must explicitly exclude primary
+  (`.lane-btn:hover:not(:disabled):not(.primary)`) — otherwise a `.primary` blue button turns
+  **grey** on hover instead of darkening. Keep the `:not(.primary)` on that selector.
 - **Focus** (keyboard `:focus-visible`) = `box-shadow: 0 0 0 3px var(--focus-ring)` (accent)
   for most controls, a **purple** ring for the Copilot buttons (`.copilot-btn`, `.fix-btn`);
   inputs and the switch use the same box-shadow ring (not `outline`). Mouse clicks leave no
@@ -627,3 +648,12 @@ handoffs appear (they'd want their own treatment rather than diluting the gradie
   14px, `--dim` by default, `--accent` on `.lane-btn` hover, `--on-emphasis` on filled
   buttons. Keep an informative icon even when restyling (e.g. `#dev-fix` keeps its camera
   icon to signal the screenshot step, while adopting the `.copilot-btn` color).
+
+### Layout: scrolling tab panels
+- `.tab-panel` is `position:absolute; inset:0; …; overflow-y:auto` (a fixed viewport). Inside
+  a panel that stacks multiple sections (e.g. `#tab-deps` = Updates + Security), **sections
+  must be `flex:0 0 auto`** so they take their natural height and the *panel* scrolls as one
+  column. **Never give the sections (or their inner tables) `min-height:0`** — that lets flex
+  shrink a section below its content, and the inner table then overflows its box and paints
+  **over** the next section (the historic Updates/Security overlap bug). One scroll container
+  (the panel), naturally-sized children.

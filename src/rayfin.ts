@@ -467,3 +467,21 @@ export function validateRayfinArgs(args: unknown): string[] | null {
 export function rayfinArgv(pm: PackageManager, args: string[]): string[] {
   return exec(pm, ["rayfin", ...args]);
 }
+
+const WORKSPACE_GUID =
+  /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+
+// Pick the right `rayfin up` workspace flag for a user-entered target. The value
+// is passed to the CLI as a single argv element (no shell), so it can't inject;
+// this only decides which flag describes it:
+//   - a portal URL  → --workspace-uri
+//   - a bare GUID   → --workspace-id
+//   - anything else → --workspace (display name)
+export function rayfinWorkspaceFlag(
+  value: string,
+): "--workspace-uri" | "--workspace-id" | "--workspace" {
+  const v = value.trim();
+  if (/^https?:\/\//i.test(v)) return "--workspace-uri";
+  if (WORKSPACE_GUID.test(v)) return "--workspace-id";
+  return "--workspace";
+}

@@ -469,7 +469,7 @@ body {
   flex: 0 0 auto;
 }
 
-.lane-btn:hover:not(:disabled) {
+.lane-btn:hover:not(:disabled):not(.primary) {
   background: var(--surface-hover);
 }
 
@@ -1780,6 +1780,28 @@ table.dep-table {
   color: var(--dim);
   font-size: 12px;
 }
+.rf-deploy-form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.rf-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  padding: 5px 8px;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.rf-input:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--focus-ring);
+  border-color: var(--accent);
+}
 .rf-kv {
   display: flex;
   align-items: center;
@@ -2055,16 +2077,15 @@ table.dep-table {
 #tab-deps .deps-section {
   display: flex;
   flex-direction: column;
-  min-height: 0;
+  /* Don't let flex shrink a section below its content: the inner table would
+     overflow its box and paint over the next section (the Updates/Security
+     overlap). Sections take their natural height; #tab-deps scrolls instead. */
+  flex: 0 0 auto;
   gap: 6px;
 }
 #tab-deps .deps-section.security {
   margin-top: 12px;
   padding-top: 12px;
-}
-#tab-deps .outdated,
-#tab-deps .audit-detail {
-  min-height: 0;
 }
 
 .deps-section-head {

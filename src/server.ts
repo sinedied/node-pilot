@@ -203,6 +203,11 @@ async function handleApi(
         .switchRayfinWorkspace(String(body.name || ""))
         .catch((e) => controller.log(String(e), "error"));
       return sendJson(res, 202, { started: true });
+    case "POST /api/rayfin/deploy":
+      controller
+        .deployRayfinWorkspace(body.workspace)
+        .catch((e) => controller.log(String(e), "error"));
+      return sendJson(res, 202, { started: true });
     case "POST /api/rayfin/start":
       return sendJson(res, 200, await controller.startRayfinProject({ requireNoProject: true }));
     case "POST /api/debug/start":

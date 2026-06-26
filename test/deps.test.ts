@@ -8,6 +8,7 @@ import { spawnSync } from "node:child_process";
 import { Controller } from "../src/controller.ts";
 import { normalizeRepoUrl, buildDepLinks, parseAudit, readDevSet } from "../src/deps.ts";
 import { buildDepsUpdatePrompt, buildDepsAuditFixPrompt } from "../src/fix.ts";
+import { supportsAuditFix, auditFix } from "../src/pm.ts";
 
 const dir = await mkdtemp(path.join(os.tmpdir(), "np-deps-"));
 const manifest = path.join(dir, "package.json");
@@ -169,6 +170,22 @@ describe("parseAudit", () => {
     );
     expect(r.vulnerabilities[0].fixAvailable).toBe(false);
     expect(r.vulnerabilities[0].fix).toBeUndefined();
+  });
+});
+
+describe("supportsAuditFix / auditFix", () => {
+  it("supports npm, pnpm and yarn but not bun", () => {
+    expect(supportsAuditFix("npm")).toBe(true);
+    expect(supportsAuditFix("pnpm")).toBe(true);
+    expect(supportsAuditFix("yarn")).toBe(true);
+    expect(supportsAuditFix("bun")).toBe(false);
+  });
+  it("builds the non-interactive, semver-safe fix command per manager", () => {
+    expect(auditFix("npm")).toEqual(["npm", "audit", "fix"]);
+    expect(auditFix("pnpm")).toEqual(["pnpm", "audit", "--fix"]);
+    expect(auditFix("yarn")).toEqual(["yarn", "npm", "audit", "--fix"]);
+    // never the breaking --force variant
+    expect(auditFix("npm")).not.toContain("--force");
   });
 });
 

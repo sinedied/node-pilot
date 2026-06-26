@@ -103,6 +103,14 @@ export function audit(pm: PackageManager): AuditCommand {
   }
 }
 
+// Whether the package manager has a non-interactive "fix advisories in place"
+// command. bun has no `audit fix`, so its vulnerabilities go straight to Copilot.
+export function supportsAuditFix(pm: PackageManager): boolean {
+  return pm === "npm" || pm === "pnpm" || pm === "yarn";
+}
+
+// Build argv to apply semver-compatible security fixes (never the breaking
+// `--force` variant). Only valid when supportsAuditFix(pm) is true.
 export function auditFix(pm: PackageManager): string[] {
   switch (pm) {
     case "pnpm":
