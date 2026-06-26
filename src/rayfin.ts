@@ -98,29 +98,104 @@ export function parseYml(text: string): ParsedYml {
 
 // ---- Schema parser (decorators → entities) --------------------------------
 
-// Line-based, tolerant parser for rayfin/data/schema.ts. Captures @entity /
-// @role classes and their field decorators. Falls back gracefully (empty list)
-// when the file shape is unexpected; dab-config.json supplements permissions.
+interface Decorator {
+  name: string;
+  args: string;
+}
+
+// Field decorators that only annotate constraints — never the field's type — so
+// when several are stacked on one property we don't mistake one for the type.
+const METADATA_DECORATORS: ReadonlySet<string> = new Set([
+  "unique",
+  "index",
+  "default",
+  "nullable",
+  "primary",
+  "min",
+  "max",
+]);
+
+// Collapse newlines that fall *inside decorator argument parentheses*, so a
+// decorator whose args span several lines (e.g. `@text({\n  maxLength: 200\n})`)
+// becomes one logical line. Only paren depth is tracked, so class/object `{ }`
+// bodies — and the newlines that structure them — are left untouched.
+function collapseDecoratorArgs(text: string): string {
+  let depth = 0;
+  let out = "";
+  for (const ch of text) {
+    if (ch === "(") depth++;
+    else if (ch === ")") depth = Math.max(0, depth - 1);
+    if ((ch === "\n" || ch === "\r") && depth > 0) {
+      out += " ";
+      continue;
+    }
+    out += ch;
+  }
+  return out;
+}
+
+// Consume one `@name(...args...)` decorator from the start of a line, matching
+// parentheses so nested calls like `@one(() => User)` are captured whole.
+// Returns the decorator plus the remaining text, or null when the line does not
+// start with a balanced decorator.
+function consumeDecorator(line: string): { name: string; args: string; rest: string } | null {
+  const head = line.match(/^@(\w+)\s*\(/);
+  if (!head) return null;
+  let depth = 1;
+  let i = head[0].length;
+  const start = i;
+  for (; i < line.length && depth > 0; i++) {
+    const c = line[i];
+    if (c === "(") depth++;
+    else if (c === ")") depth--;
+  }
+  if (depth !== 0) return null;
+  return { name: head[1], args: line.slice(start, i - 1), rest: line.slice(i).trim() };
+}
+
+// Tolerant parser for rayfin/data/schema.ts. Captures @entity / @role classes and
+// their field decorators. Handles decorators stacked on a field, a decorator and
+// its property on the same line, and decorator args spanning several lines. Falls
+// back gracefully (empty list) when the file shape is unexpected; dab-config.json
+// supplements permissions.
 export function parseSchema(text: string): RayfinEntity[] {
   const entities: RayfinEntity[] = [];
   let pendingRoles: string[] = [];
   let pendingEntity = false;
-  let pendingDecorator: { name: string; args: string } | null = null;
+  let pendingDecorators: Decorator[] = [];
   let current: RayfinEntity | null = null;
 
-  for (const raw of text.split(/\r?\n/)) {
-    const t = raw.trim();
+  // Blank full-line comments before collapsing, so an unbalanced paren in a
+  // comment can't skew the paren-depth tracking below.
+  const cleaned = collapseDecoratorArgs(text.replace(/^[ \t]*\/\/.*$/gm, ""));
+  for (const raw of cleaned.split(/\r?\n/)) {
+    let t = raw.trim();
     if (!t || t.startsWith("//")) continue;
 
-    const role = t.match(/^@role\(\s*["']([^"']+)["']\s*\)/);
-    if (role) {
-      pendingRoles.push(role[1]);
-      continue;
+    // Pull every leading decorator off the line (there may be several).
+    const decs: Decorator[] = [];
+    for (let d = consumeDecorator(t); d; d = consumeDecorator(t)) {
+      decs.push({ name: d.name, args: d.args });
+      t = d.rest;
     }
-    if (/^@entity\b/.test(t)) {
+    // Bare `@entity` (no parentheses) isn't consumed above; honor it too.
+    if (!decs.length && /^@entity\b/.test(t)) {
       pendingEntity = true;
       continue;
     }
+    // Sort decorators into class-level (@role/@entity) and field-level.
+    for (const d of decs) {
+      if (d.name === "role") {
+        const m = d.args.match(/["']([^"']+)["']/);
+        if (m) pendingRoles.push(m[1]);
+      } else if (d.name === "entity") {
+        pendingEntity = true;
+      } else {
+        pendingDecorators.push(d);
+      }
+    }
+    if (!t) continue; // line held only decorators
+
     const cls = t.match(/^export\s+(?:default\s+)?(?:abstract\s+)?class\s+(\w+)/);
     if (cls) {
       current = {
@@ -133,42 +208,39 @@ export function parseSchema(text: string): RayfinEntity[] {
       entities.push(current);
       pendingRoles = [];
       pendingEntity = false;
-      pendingDecorator = null;
+      pendingDecorators = [];
       continue;
     }
-    // A field decorator on its own line (e.g. `@text({ maxLength: 200 })`).
-    const dec = t.match(/^@(\w+)\((.*)\)\s*$/);
-    if (dec && current) {
-      pendingDecorator = { name: dec[1], args: dec[2] };
-      continue;
-    }
-    // The property declaration that the pending decorator applies to.
+
     const prop = t.match(/^(\w+)([!?]?)\s*:\s*(.+?);?\s*$/);
-    if (prop && current && pendingDecorator) {
-      current.fields.push(buildField(prop[1], prop[2], pendingDecorator));
-      pendingDecorator = null;
+    if (prop && current && pendingDecorators.length) {
+      current.fields.push(buildField(prop[1], prop[2], pendingDecorators));
+      pendingDecorators = [];
+      continue;
     }
+    // Leading decorators that didn't resolve to a property we understand are
+    // dropped so they can't leak onto an unrelated later field.
+    if (decs.length) pendingDecorators = [];
   }
   return entities;
 }
 
-function buildField(
-  name: string,
-  marker: string,
-  dec: { name: string; args: string },
-): RayfinField {
-  const isRelation = dec.name === "one" || dec.name === "many";
-  if (isRelation) {
-    const target = dec.args.match(/=>\s*(\w+)/)?.[1] || "?";
+function buildField(name: string, marker: string, decs: Decorator[]): RayfinField {
+  const relation = decs.find((d) => d.name === "one" || d.name === "many");
+  const optional =
+    marker === "?" ||
+    decs.some((d) => d.name === "nullable" || /\bnullable\s*:\s*true\b/.test(d.args));
+  if (relation) {
+    const target = relation.args.match(/=>\s*(\w+)/)?.[1] || "?";
     return {
       name,
       type: target,
-      optional: marker === "?",
-      relation: { kind: dec.name as "one" | "many", target },
+      optional,
+      relation: { kind: relation.name as "one" | "many", target },
     };
   }
-  const optional = marker === "?" || /\bnullable\s*:\s*true\b/.test(dec.args);
-  return { name, type: dec.name, optional, relation: null };
+  const primary = decs.find((d) => !METADATA_DECORATORS.has(d.name)) ?? decs[0];
+  return { name, type: primary.name, optional, relation: null };
 }
 
 // ---- dab-config.json (generated Data API Builder config) ------------------
@@ -179,6 +251,17 @@ interface DabEntity {
 
 const isRecord = (x: unknown): x is Record<string, unknown> =>
   !!x && typeof x === "object" && !Array.isArray(x);
+
+// Normalize an entity name to a singular, lower-case key so schema class names
+// (e.g. `User`, `Category`) match DAB entity keys, which are frequently the
+// pluralized REST route names (`Users`, `Categories`).
+function singularKey(name: string): string {
+  const s = name.toLowerCase();
+  if (s.endsWith("ies")) return `${s.slice(0, -3)}y`;
+  if (/(?:s|x|z|ch|sh)es$/.test(s)) return s.slice(0, -2);
+  if (s.endsWith("s") && !s.endsWith("ss")) return s.slice(0, -1);
+  return s;
+}
 
 function permissionsFromDab(dab: unknown): Map<string, RayfinPermission[]> {
   const out = new Map<string, RayfinPermission[]>();
@@ -191,7 +274,15 @@ function permissionsFromDab(dab: unknown): Map<string, RayfinPermission[]> {
       for (const p of ent.permissions) {
         if (!isRecord(p)) continue;
         const actions = Array.isArray(p.actions)
-          ? p.actions.map(String)
+          ? p.actions
+              .map((a) =>
+                typeof a === "string"
+                  ? a
+                  : isRecord(a) && typeof a.action === "string"
+                    ? a.action
+                    : null,
+              )
+              .filter((a): a is string => !!a)
           : typeof p.actions === "string"
             ? [p.actions]
             : [];
@@ -274,7 +365,16 @@ export async function readRayfinState(cwd: string): Promise<RayfinState> {
   if (hasDabConfig) {
     const dab = await readJson<unknown>(dabPath);
     const perms = permissionsFromDab(dab);
-    for (const ent of entities) ent.permissions = perms.get(ent.name) || [];
+    // DAB keys are often pluralized route names; match on a normalized key so a
+    // `User` class still picks up the `Users` entity's permissions.
+    const permsByKey = new Map<string, RayfinPermission[]>();
+    for (const [dabName, p] of perms) {
+      const key = singularKey(dabName);
+      if (!permsByKey.has(key)) permsByKey.set(key, p);
+    }
+    for (const ent of entities) {
+      ent.permissions = perms.get(ent.name) ?? permsByKey.get(singularKey(ent.name)) ?? [];
+    }
     // Fallback: if the schema parse found nothing, surface DAB entity names.
     if (!entities.length && perms.size) {
       entities = [...perms.keys()].map((name) => ({

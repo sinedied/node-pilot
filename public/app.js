@@ -834,6 +834,7 @@ function openRayfinSwitchMenu() {
   closeTabMore();
   closePinnedMore();
   closeProjectMenu();
+  closeRayfinExportMenu();
   renderRayfinSwitchMenu();
   const menu = $("#rf-switch-menu");
   menu.classList.remove("hidden");
@@ -891,7 +892,12 @@ function loadCytoscape() {
       }
     } catch {}
     return cy;
-  })();
+  })().catch((err) => {
+    // Don't cache a rejected load: a transient asset failure must not permanently
+    // wedge the graph. Reset so the next renderRayfinGraph() retries the fetch.
+    cytoscapeLoad = null;
+    throw err;
+  });
   return cytoscapeLoad;
 }
 
@@ -1277,9 +1283,12 @@ async function rfExportGraph(format) {
       const blob = cy.png({ output: "blob", full: true, scale: 2, bg: colors.bg });
       downloadBlob("rayfin-data-model.png", blob);
     }
-  } catch {}
-  cy.edges().removeClass("shown");
-  rfUpdateEdgeLabels(null); // restore the interactive (selection-based) labels
+  } catch (err) {
+    console.warn("Rayfin graph export failed", err);
+  } finally {
+    cy.edges().removeClass("shown");
+    rfUpdateEdgeLabels(null); // restore the interactive (selection-based) labels
+  }
 }
 
 function openRayfinExportMenu() {
