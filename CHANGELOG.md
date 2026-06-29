@@ -1,3 +1,15 @@
+# [1.1.0](https://github.com/sinedied/cockpit-js/compare/v1.0.0...v1.1.0) (2026-06-29)
+
+
+### Bug Fixes
+
+* **rayfin:** resolve sign-in via the CLI instead of a local file check ([bcb39fa](https://github.com/sinedied/cockpit-js/commit/bcb39fac6e2006ad0ecc30516669b001ed9eee15))
+
+
+### Features
+
+* detect XO, Rush, Turbo/Nx and add Playwright e2e lane ([53d2cd7](https://github.com/sinedied/cockpit-js/commit/53d2cd74a36ac02e1c2784281dcefb4c0ebd94a6))
+
 # 1.0.0 (2026-06-29)
 
 
