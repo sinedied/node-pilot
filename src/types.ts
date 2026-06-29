@@ -158,7 +158,7 @@ export interface RayfinConfig {
 export interface RayfinState {
   detected: boolean;
   config: RayfinConfig | null;
-  auth: { signedIn: boolean };
+  auth: { signedIn: boolean | null };
   deployments: { active: string | null; list: RayfinDeployment[] };
   entities: RayfinEntity[];
   functions: string[];

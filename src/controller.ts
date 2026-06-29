@@ -6,6 +6,7 @@ import path from "node:path";
 import os from "node:os";
 import { watch as fsWatch, statSync, type FSWatcher } from "node:fs";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
+import type { ChildProcess } from "node:child_process";
 import { detect } from "./detect.ts";
 import { run, start } from "./process-runner.ts";
 import { runScript as pmRunScript, supportsAuditFix } from "./pm.ts";
@@ -37,7 +38,15 @@ import {
 } from "./debug.ts";
 import { loadSettings, saveSettings, KNOWN_TABS } from "./settings.ts";
 import { computeStats } from "./info.ts";
-import { readRayfinState, validateRayfinArgs, rayfinArgv, rayfinWorkspaceFlag } from "./rayfin.ts";
+import {
+  readRayfinState,
+  validateRayfinArgs,
+  rayfinArgv,
+  rayfinWorkspaceFlag,
+  rayfinLoginStatusArgv,
+  hasLocalRayfinBin,
+  interpretLoginStatus,
+} from "./rayfin.ts";
 import { enumerateProjects } from "./projects.ts";
 import * as deps from "./deps.ts";
 import type { SafeUpdateOptions, SafeUpdateResult } from "./deps.ts";
@@ -1589,7 +1598,11 @@ export class Controller {
     // cache with another project's state.
     const cwd = this.cwd;
     const next = await readRayfinState(cwd);
-    if (this.cwd === cwd) this._rayfin = next;
+    if (this.cwd !== cwd) return next; // switched mid-read; leave sign-in unknown
+    const signedIn = await this.probeRayfinSignedIn(cwd);
+    if (this.cwd !== cwd) return next;
+    next.auth.signedIn = signedIn;
+    this._rayfin = next;
     return next;
   }
 
@@ -1603,8 +1616,41 @@ export class Controller {
     const cwd = this.cwd;
     const next = await readRayfinState(cwd);
     if (this.cwd !== cwd) return; // project switched mid-read; a fresh detection drives the UI
+    const signedIn = await this.probeRayfinSignedIn(cwd);
+    if (this.cwd !== cwd) return;
+    next.auth.signedIn = signedIn;
     this._rayfin = next;
     this.broadcast({ type: "rayfin:state", rayfin: next });
+  }
+
+  // Ask the CLI whether the user is signed in (`rayfin login status`). The CLI is
+  // the source of truth — credentials may live in a global store, not the project
+  // — so a file check is unreliable. Only runs when the `rayfin` bin is installed
+  // locally (so it never fetches/prompts), is bounded by a timeout, and any
+  // failure / missing CLI resolves to `null` (unknown) — never a false "signed out".
+  private async probeRayfinSignedIn(cwd: string): Promise<boolean | null> {
+    const d = this.detection;
+    if (!d?.hasProject) return null;
+    // No locally-installed CLI -> we can't tell; don't spawn (would hit the
+    // registry and/or exit non-zero, misreading as "signed out").
+    if (!hasLocalRayfinBin(cwd)) return null;
+    const argv = rayfinLoginStatusArgv(d.pm);
+    let child: ChildProcess | undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<null>((resolve) => {
+      timer = setTimeout(() => {
+        try {
+          child?.kill();
+        } catch {}
+        resolve(null);
+      }, 5000);
+    });
+    const probe = run(argv, { cwd, onStart: (c) => (child = c) }).then((res) =>
+      interpretLoginStatus(res),
+    );
+    const result = await Promise.race([probe, timeout]);
+    if (timer) clearTimeout(timer);
+    return result;
   }
 
   // Shared lane runner for the Rayfin CLI buttons. Streams to the Console like

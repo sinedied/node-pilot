@@ -1370,8 +1370,10 @@ function renderRayfin() {
 
   // Environment
   const auth = $("#rf-auth-chip");
-  auth.textContent = r.auth?.signedIn ? "Signed in" : "Signed out";
-  auth.className = `rf-chip ${r.auth?.signedIn ? "ok" : "muted"}`;
+  const signedIn = r.auth?.signedIn;
+  auth.textContent =
+    signedIn === true ? "Signed in" : signedIn === false ? "Signed out" : "Unknown";
+  auth.className = `rf-chip ${signedIn === true ? "ok" : "muted"}`;
   $("#rf-backend-chip").classList.add("hidden");
   const methods = (r.config?.authMethods || []).join(", ") || "—";
   const hosting = r.config?.staticHosting?.folder;

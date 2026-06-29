@@ -426,7 +426,18 @@ inspiration: [coffilot](https://github.com/jdubois/coffilot). Full design in
   cheap (rayfin.yml or `@microsoft/rayfin*` deps → `Detection.rayfin`); the full dashboard
   is lazy (`/api/rayfin/state`, cached in `controller._rayfin`, invalidated on detect +
   after every CLI lane). Never surface secrets — only public IDs/URLs from
-  `.deployments.json`/`.env`; auth tokens (`rayfin/.rayfin/auth.json`) are only presence-checked.
+  `.deployments.json`/`.env`. **Sign-in is resolved by the CLI, not a file check**: the
+  controller runs `rayfin login status` (`probeRayfinSignedIn` → `rayfinLoginStatusArgv` +
+  `interpretLoginStatus`) when (re)building the cached dashboard model. The CLI is the
+  source of truth because credentials can live in a **global** store (`~/.rayfin/auth.json`),
+  not project-local — the old `existsSyncSafe(<project>/rayfin/.rayfin/auth.json)` check gave
+  a false "Signed out". The probe is **gated on `hasLocalRayfinBin(cwd)`** (walks up
+  `node_modules/.bin/rayfin{,.cmd}` for hoisted monorepos) so it only spawns when the CLI is
+  installed — never hitting the registry or prompting — and is **timeout-bounded (~5s, child
+  killed)**. It's **tri-state**: exit 0 → signed in, exit > 0 → signed out, any
+  error/timeout/missing-CLI → **`auth.signedIn = null` ("Unknown")** — never collapsed to a
+  false "Signed out". npm still passes `--no` (belt-and-suspenders against any prompt/fetch).
+  The client chip renders Signed in / Signed out / Unknown accordingly.
 
 ## Workflow
 

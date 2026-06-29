@@ -389,7 +389,10 @@ export async function readRayfinState(cwd: string): Promise<RayfinState> {
 
   const functions = await listDirs(path.join(dir, "functions"));
   const connectors = await listDirs(path.join(dir, "connectors"));
-  const signedIn = existsSyncSafe(path.join(dir, ".rayfin", "auth.json"));
+  // Sign-in is resolved by the controller via `rayfin login status` (the CLI is
+  // the source of truth — credentials may live globally, not project-local).
+  // `null` here is the "unknown" placeholder until that probe runs.
+  const signedIn: boolean | null = null;
   const hasAgentFiles =
     existsSyncSafe(path.join(cwd, "AGENTS.md")) ||
     existsSyncSafe(path.join(cwd, "mcp-server.json"));
@@ -466,6 +469,63 @@ export function validateRayfinArgs(args: unknown): string[] | null {
 // Build argv to run the project-local `rayfin` binary via the detected PM.
 export function rayfinArgv(pm: PackageManager, args: string[]): string[] {
   return exec(pm, ["rayfin", ...args]);
+}
+
+// Build argv to ask the CLI whether the user is signed in (`rayfin login status`).
+// Safety (no install / no network / no prompt) is enforced by the controller's
+// `hasLocalRayfinBin` preflight — this only runs when the binary is already on
+// disk — but npm still gets `--no` as belt-and-suspenders so it can never prompt
+// or fetch. The exit code is the source of truth (the CLI reads its own creds,
+// which may live in a global store, not project-local).
+export function rayfinLoginStatusArgv(pm: PackageManager): string[] {
+  const cmd = ["rayfin", "login", "status"];
+  switch (pm) {
+    case "pnpm":
+      // `pnpm exec` only runs binaries already in the project — never installs.
+      return ["pnpm", "exec", ...cmd];
+    case "yarn":
+      // `yarn exec` likewise resolves from the local node_modules/.bin.
+      return ["yarn", "exec", "--", ...cmd];
+    case "bun":
+      // `bun x` uses the local bin when present (guaranteed by the preflight).
+      return ["bun", "x", ...cmd];
+    default:
+      // npm: `--no` => never install/prompt; run the local bin or fail fast.
+      return ["npm", "exec", "--no", "--", ...cmd];
+  }
+}
+
+// Whether the `rayfin` CLI is installed locally and runnable. We walk up from the
+// project dir checking each `node_modules/.bin/rayfin` (mirroring how the package
+// managers resolve a bin) so hoisted monorepo installs are found too. This gates
+// the sign-in probe: when the CLI isn't present we report "unknown" instead of
+// spawning a PM wrapper that would hit the registry and/or exit non-zero (which
+// would wrongly read as "signed out"). Cross-platform: also checks `rayfin.cmd`.
+export function hasLocalRayfinBin(cwd: string): boolean {
+  let dir = path.resolve(cwd);
+  for (let i = 0; i < 8; i++) {
+    const bin = path.join(dir, "node_modules", ".bin");
+    if (existsSyncSafe(path.join(bin, "rayfin")) || existsSyncSafe(path.join(bin, "rayfin.cmd"))) {
+      return true;
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return false;
+}
+
+// Map a `rayfin login status` run to a tri-state sign-in flag:
+//   exit 0      => signed in (true)
+//   exit > 0    => signed out (false)
+//   spawn error / negative or killed exit => unknown (null)
+// Unknown is deliberately never collapsed to "signed out" so a missing CLI,
+// timeout, or crash can't show a false negative.
+export function interpretLoginStatus(result: { code: number; error?: string }): boolean | null {
+  if (result.error) return null;
+  if (result.code === 0) return true;
+  if (result.code > 0) return false;
+  return null;
 }
 
 const WORKSPACE_GUID =

@@ -5,7 +5,14 @@ import { afterEach, describe, expect, it } from "vitest";
 import { mkdtemp, writeFile, mkdir, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { parseSchema, readRayfinState, rayfinWorkspaceFlag } from "../src/rayfin.ts";
+import {
+  hasLocalRayfinBin,
+  interpretLoginStatus,
+  parseSchema,
+  rayfinLoginStatusArgv,
+  readRayfinState,
+  rayfinWorkspaceFlag,
+} from "../src/rayfin.ts";
 
 describe("rayfinWorkspaceFlag", () => {
   it("maps a portal URL to --workspace-uri", () => {
@@ -148,5 +155,86 @@ describe("readRayfinState DAB enrichment", () => {
       { role: "admin", actions: ["read", "create"] },
       { role: "anonymous", actions: ["*"] },
     ]);
+  });
+
+  it("leaves sign-in unknown (null) — resolved by the CLI probe, not a file check", async () => {
+    dir = await mkdtemp(path.join(os.tmpdir(), "np-rayfin-"));
+    const rf = path.join(dir, "rayfin");
+    await mkdir(path.join(rf, ".rayfin"), { recursive: true });
+    // Even with a project-local auth file present, the model no longer reads it.
+    await writeFile(path.join(rf, ".rayfin", "auth.json"), "{}");
+    const state = await readRayfinState(dir);
+    expect("auth" in state).toBe(true);
+    if (!("auth" in state)) return;
+    expect(state.auth.signedIn).toBeNull();
+  });
+});
+
+describe("rayfinLoginStatusArgv", () => {
+  it("builds an exec for each package manager (npm gets --no)", () => {
+    expect(rayfinLoginStatusArgv("npm")).toEqual([
+      "npm",
+      "exec",
+      "--no",
+      "--",
+      "rayfin",
+      "login",
+      "status",
+    ]);
+    expect(rayfinLoginStatusArgv("pnpm")).toEqual(["pnpm", "exec", "rayfin", "login", "status"]);
+    expect(rayfinLoginStatusArgv("yarn")).toEqual([
+      "yarn",
+      "exec",
+      "--",
+      "rayfin",
+      "login",
+      "status",
+    ]);
+    expect(rayfinLoginStatusArgv("bun")).toEqual(["bun", "x", "rayfin", "login", "status"]);
+  });
+});
+
+describe("hasLocalRayfinBin", () => {
+  let dir: string;
+  afterEach(async () => {
+    if (dir) await rm(dir, { recursive: true, force: true });
+  });
+
+  it("is false when the bin is absent", async () => {
+    dir = await mkdtemp(path.join(os.tmpdir(), "np-rayfin-bin-"));
+    expect(hasLocalRayfinBin(dir)).toBe(false);
+  });
+
+  it("is true when node_modules/.bin/rayfin exists", async () => {
+    dir = await mkdtemp(path.join(os.tmpdir(), "np-rayfin-bin-"));
+    const bin = path.join(dir, "node_modules", ".bin");
+    await mkdir(bin, { recursive: true });
+    await writeFile(path.join(bin, "rayfin"), "#!/bin/sh\n");
+    expect(hasLocalRayfinBin(dir)).toBe(true);
+  });
+
+  it("walks up to find a hoisted monorepo bin", async () => {
+    dir = await mkdtemp(path.join(os.tmpdir(), "np-rayfin-bin-"));
+    const bin = path.join(dir, "node_modules", ".bin");
+    await mkdir(bin, { recursive: true });
+    await writeFile(path.join(bin, "rayfin"), "#!/bin/sh\n");
+    const member = path.join(dir, "packages", "app");
+    await mkdir(member, { recursive: true });
+    expect(hasLocalRayfinBin(member)).toBe(true);
+  });
+});
+
+describe("interpretLoginStatus", () => {
+  it("maps exit 0 to signed in", () => {
+    expect(interpretLoginStatus({ code: 0 })).toBe(true);
+  });
+  it("maps a positive exit code to signed out", () => {
+    expect(interpretLoginStatus({ code: 1 })).toBe(false);
+    expect(interpretLoginStatus({ code: 2 })).toBe(false);
+  });
+  it("maps spawn errors and negative/killed exits to unknown (null)", () => {
+    expect(interpretLoginStatus({ code: -1, error: "ENOENT" })).toBeNull();
+    expect(interpretLoginStatus({ code: -1 })).toBeNull();
+    expect(interpretLoginStatus({ code: 0, error: "boom" })).toBeNull();
   });
 });
