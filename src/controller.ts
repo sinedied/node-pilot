@@ -220,6 +220,19 @@ export class Controller {
   // The installed version the in-flight check was started for, so a stale
   // promise is never reused after a project switch / in-place upgrade.
   _rayfinUpdatePromiseFor: string | null;
+  // Sign-in probe cache. `probeRayfinSignedIn` spawns the CLI (`rayfin login
+  // status`, up to 5s), so we never block the dashboard render on it: the cached
+  // value (or null = "Unknown") is shown immediately and the probe runs in the
+  // background, broadcasting `rayfin:state` when it resolves. Keyed by cwd +
+  // throttled so revisits / post-lane refreshes don't re-spawn the CLI.
+  _rayfinSignedIn: { cwd: string; value: boolean | null; checkedAt: number } | null;
+  // The in-flight probe, keyed by the project + generation it was started for, so
+  // coalescing only applies to the *same* live project (a switch never blocks the
+  // new project's probe, and a stale resolve self-discards via the `gen` guard).
+  _rayfinSignInProbe: { cwd: string; gen: number; promise: Promise<void> } | null;
+  // A forced re-check (e.g. after a login/logout lane) requested while a probe was
+  // already running — run a fresh probe once the current one settles.
+  _rayfinSignInRecheck: boolean;
 
   constructor(
     cwd: string,
@@ -238,6 +251,9 @@ export class Controller {
     this._rayfinUpdate = null;
     this._rayfinUpdatePromise = null;
     this._rayfinUpdatePromiseFor = null;
+    this._rayfinSignedIn = null;
+    this._rayfinSignInProbe = null;
+    this._rayfinSignInRecheck = false;
     this.events = new EventEmitter();
     this.events.setMaxListeners(100);
     this.detection = null;
@@ -485,6 +501,11 @@ export class Controller {
     // cleans via its identity guard in `getRayfinUpdateInfo`.
     this._rayfinUpdate = null;
     this._rayfinUpdatePromiseFor = null;
+    // Drop the per-project sign-in probe cache too (a still-in-flight probe self-
+    // discards via its captured `gen`, so just clearing the cache + any queued
+    // recheck is enough).
+    this._rayfinSignedIn = null;
+    this._rayfinSignInRecheck = false;
   }
 
   // ---- Lazy project stats (transitive deps + sizes) -----------------------
@@ -1621,7 +1642,9 @@ export class Controller {
   // ---- Rayfin (Microsoft Rayfin BaaS dashboard) ---------------------------
 
   // Build (and cache) the read-only Rayfin dashboard model. The cache is cleared
-  // on (re)detection and after every CLI command that can change state.
+  // on (re)detection and after every CLI command that can change state. The
+  // sign-in chip is resolved by a CLI probe that we never block the render on —
+  // see `ensureSignInProbe`.
   async getRayfinState(force = false): Promise<RayfinState | { detected: false }> {
     const d = this.detection;
     if (!d?.hasProject || !d.rayfin) return { detected: false };
@@ -1631,16 +1654,20 @@ export class Controller {
     const cwd = this.cwd;
     const next = await readRayfinState(cwd);
     if (this.cwd !== cwd) return next; // switched mid-read; leave sign-in unknown
-    const signedIn = await this.probeRayfinSignedIn(cwd);
-    if (this.cwd !== cwd) return next;
-    next.auth.signedIn = signedIn;
+    // Show the last-known sign-in (or null = "Unknown") immediately, then resolve
+    // it in the background — the CLI probe is slow (~up to 5s) and must not stall
+    // the whole tab render the way it used to.
+    next.auth.signedIn = this.cachedSignIn(cwd);
     this.overlayRayfinUpdate(next);
     this._rayfin = next;
+    this.ensureSignInProbe(cwd, force);
     return next;
   }
 
   // Re-read the dashboard model and broadcast it (e.g. after a deploy / switch).
-  async refreshRayfin(): Promise<void> {
+  // Defaults to re-checking sign-in (a CLI lane may have just logged in/out), but
+  // the probe still runs in the background so the broadcast isn't delayed.
+  async refreshRayfin(forceSignIn = true): Promise<void> {
     const d = this.detection;
     if (!d?.hasProject || !d.rayfin) {
       this._rayfin = null;
@@ -1649,12 +1676,65 @@ export class Controller {
     const cwd = this.cwd;
     const next = await readRayfinState(cwd);
     if (this.cwd !== cwd) return; // project switched mid-read; a fresh detection drives the UI
-    const signedIn = await this.probeRayfinSignedIn(cwd);
-    if (this.cwd !== cwd) return;
-    next.auth.signedIn = signedIn;
+    next.auth.signedIn = this.cachedSignIn(cwd);
     this.overlayRayfinUpdate(next);
     this._rayfin = next;
     this.broadcast({ type: "rayfin:state", rayfin: next });
+    this.ensureSignInProbe(cwd, forceSignIn);
+  }
+
+  // Last-known sign-in value for `cwd` (null = unknown / never probed).
+  private cachedSignIn(cwd: string): boolean | null {
+    const c = this._rayfinSignedIn;
+    return c && c.cwd === cwd ? c.value : null;
+  }
+
+  // Background the sign-in probe so the dashboard render never waits on it. On
+  // resolution it patches the cached model's auth chip and re-broadcasts, flipping
+  // the UI from "Unknown"/last-known to the real state. Coalesces concurrent calls
+  // for the same live project, is throttled so revisits don't re-spawn the CLI, and
+  // discards stale results across project switches via the `_projectGen` guard.
+  private ensureSignInProbe(cwd: string, force = false): void {
+    const SIGNIN_TTL = 60_000;
+    const gen = this._projectGen;
+    const inflight = this._rayfinSignInProbe;
+    // A probe for this exact project + generation is already running. Coalesce —
+    // but if this is a forced re-check (auth may have just changed), queue a fresh
+    // probe to run as soon as the current one settles so we never serve a value
+    // captured before the change.
+    if (inflight && inflight.cwd === cwd && inflight.gen === gen) {
+      if (force) this._rayfinSignInRecheck = true;
+      return;
+    }
+    // A non-forced call with a fresh cached value: nothing to do.
+    if (!force) {
+      const c = this._rayfinSignedIn;
+      if (c && c.cwd === cwd && Date.now() - c.checkedAt < SIGNIN_TTL) return;
+    }
+    // (An in-flight probe for a *different* project/generation is left to self-
+    // discard; we start ours alongside it and overwrite the descriptor.)
+    const promise = this.probeRayfinSignedIn(cwd)
+      .then((value) => {
+        if (this.cwd !== cwd || this._projectGen !== gen) return; // stale; discard
+        this._rayfinSignedIn = { cwd, value, checkedAt: Date.now() };
+        if (this._rayfin && this._rayfin.auth.signedIn !== value) {
+          this._rayfin.auth.signedIn = value;
+          this.broadcast({ type: "rayfin:state", rayfin: this._rayfin });
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        // Only clear if this is still the current in-flight probe (a project switch
+        // may have started a newer one that must not be wiped).
+        if (this._rayfinSignInProbe?.promise !== promise) return;
+        this._rayfinSignInProbe = null;
+        // Honor a forced re-check queued while this probe was running.
+        if (this._rayfinSignInRecheck && this.cwd === cwd && this._projectGen === gen) {
+          this._rayfinSignInRecheck = false;
+          this.ensureSignInProbe(cwd, true);
+        }
+      });
+    this._rayfinSignInProbe = { cwd, gen, promise };
   }
 
   // Overlay the cached (network) Rayfin update result onto a freshly-read state.

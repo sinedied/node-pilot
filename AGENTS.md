@@ -456,7 +456,14 @@ inspiration: [coffilot](https://github.com/jdubois/coffilot). Full design in
   a false "Signed out". The probe is **gated on `hasLocalRayfinBin(cwd)`** (walks up
   `node_modules/.bin/rayfin{,.cmd}` for hoisted monorepos) so it only spawns when the CLI is
   installed — never hitting the registry or prompting — and is **timeout-bounded (~5s, child
-  killed)**. It's **tri-state**: exit 0 → signed in, exit > 0 → signed out, any
+  killed)**. **The probe never blocks the dashboard render** (it's slow — npm-exec + CLI
+  boot, often hits the 5s timeout — and used to stall the whole tab): `getRayfinState` /
+  `refreshRayfin` return the model immediately with the **last-known sign-in** (a per-cwd
+  cache, `_rayfinSignedIn`, throttled ~60s) or `null` ("Unknown"), then `ensureSignInProbe`
+  runs the CLI in the **background** and broadcasts a `rayfin:state` update to flip the chip
+  when it resolves (coalesced via `_rayfinSignedInPromise`; cache cleared in
+  `resetProjectState`; `refreshRayfin` force-rechecks so a login/logout lane is reflected).
+  It's **tri-state**: exit 0 → signed in, exit > 0 → signed out, any
   error/timeout/missing-CLI → **`auth.signedIn = null` ("Unknown")** — never collapsed to a
   false "Signed out". npm still passes `--no` (belt-and-suspenders against any prompt/fetch).
   The client chip renders Signed in / Signed out / Unknown accordingly.
