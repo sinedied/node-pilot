@@ -1,17 +1,18 @@
 {
-  "name": "rayfin-todo-app",
+  "name": "rayfin-mock-app",
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Cockpit.js dogfood fixture: a minimal Microsoft Rayfin app (todo list) used to exercise the Rayfin tab. Renders offline from committed mock deployment files.",
+  "description": "Cockpit.js dogfood fixture: an OFFLINE mock Microsoft Rayfin app. Renders the Rayfin tab fully from committed mock files (rayfin.yml / .deployments.json / schema) with no install, login, or Docker — the counterpart to the real-deployable e2e/rayfin-todo-app.",
   "scripts": {
-    "dev": "rayfin dev",
+    "dev": "rayfin up --exclude-services staticHosting && vite",
     "build": "echo \"static build\"",
     "deploy": "rayfin up",
     "test": "echo \"no tests\""
   },
   "dependencies": {
-    "@microsoft/rayfin": "^1.33.0"
+    "@microsoft/rayfin-core": "^1.33.0",
+    "@microsoft/rayfin-client": "^1.33.0"
   },
   "devDependencies": {
     "@microsoft/rayfin-cli": "^1.33.0"

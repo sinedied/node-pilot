@@ -1,18 +1,24 @@
-# Rayfin project configuration.
+# Rayfin project configuration (real schema, as written by the Rayfin CLI).
 # Docs: https://aka.ms/rayfin/docs
-name: rayfin-todo-app
-
+id: rayfin-mock-app
+name: Rayfin Mock App
+version: 1.0.0
 services:
   auth:
-    # Sign-in methods exposed by the generated auth API.
-    methods:
-      - fabric
-      - password
+    enabled: true
+    # Sign-in providers are enabled as nested blocks (not a flat list).
+    fabric:
+      enabled: true
+    password:
+      enabled: true
+    allowedRedirectUris:
+      - http://localhost:5173
   data:
     # Database dialect provisioned by Rayfin (mssql | postgresql).
+    enabled: true
     dialect: mssql
-    schema: ./data/schema.ts
   staticHosting:
-    folder: ./src
-    indexDocument: index.html
+    enabled: true
+    folder: dist
     buildCommand: npm run build
+    indexDocument: index.html
