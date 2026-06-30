@@ -89,7 +89,8 @@ inspiration: [coffilot](https://github.com/jdubois/coffilot). Full design in
   stray artifact); `e2e/**/node_modules` stays gitignored. **Two Rayfin fixtures** (see the Rayfin gotcha for the split):
   `e2e/rayfin-app/` (`rayfin-mock-app`) is the **offline mock** — committed real-schema
   `rayfin/` files (`fabric*` `.deployments.json` + nested-provider `rayfin.yml` + `.env` /
-  `dab-config.json` / `data/schema.ts` / `functions/`) so the **Rayfin tab renders fully
+  `dab-config.json` / per-entity `data/<Entity>.ts` + aggregating `data/schema.ts` /
+  `functions/`) so the **Rayfin tab renders fully
   offline** (no Docker/Fabric/login/install); `e2e/rayfin-todo-app/` (`rayfin-todo-app`) is
   the **real, deployable** app (the official `todo-app-template`: real `@microsoft/rayfin-*`
   deps, Vite + React) kept as **source only** for hands-on deploy testing. Both excluded from
@@ -394,12 +395,23 @@ inspiration: [coffilot](https://github.com/jdubois/coffilot). Full design in
   (`@microsoft/rayfin-mcp`) + CLI + agent skills, so duplicating `rayfin` commands as
   `rayfin_*` agent actions would be redundant. Instead the tab reads `rayfin/` files
   offline (`readRayfinState`: rayfin.yml → config, `.deployments.json` → Fabric workspace +
-  `dab-config.json`/`schema.ts` → data-model viewer (a **List | Graph** toggle: a two-pane
+  `dab-config.json`/`data/*.ts` → data-model viewer (a **List | Graph** toggle: a two-pane
   list/detail on the List side, a Cytoscape node-link diagram of entities + relations on
   the Graph side — see the vendored-lib note above),
   `.env` → public vars, `functions/` + connectors) and its buttons run **allow-listed**
   `rayfin` CLI commands as Console **lanes** (`rayfin:<cmd>`, via `npm exec -- rayfin …`),
-  streamed like build/lint. The Fabric-workspace switcher is a **custom popover dropdown**
+  streamed like build/lint. **Data model is parsed from every `rayfin/data/*.ts` file**, not
+  just `schema.ts`: canonical Rayfin defines each `@entity` in its own `data/<Entity>.ts` and
+  only *registers* them in `data/schema.ts` (`type AppSchema = { Name: Name }`), so parsing
+  schema.ts alone misses them. `readRayfinState` scans all `data/*.ts`, `parseSchema`s each,
+  and merges/dedupes by name (`mergeEntities`, richest entry wins) — this also still handles
+  an inline-in-schema.ts layout. `schema.ts`'s **registration** (`parseSchemaRegistration`:
+  `export const schema = [A, B]` array, else `type *Schema = { A: A }` keys) is then the
+  **authoritative set + order** — unregistered helper/draft classes in `data/` are filtered
+  out and entities display in registration order; it falls back to the full scan only when no
+  registration resolves (so a misfiring parser never hides real entities). Both e2e fixtures
+  use the canonical per-file layout. The
+  Fabric-workspace switcher is a **custom popover dropdown**
   (`#rf-switch-toggle` + `#rf-switch-menu`, mirroring the project selector) — not a native
   `<select>` — so it matches the rest of the chrome. `validateRayfinArgs` gates an
   **exact-command** allow-list

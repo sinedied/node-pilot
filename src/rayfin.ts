@@ -240,6 +240,45 @@ export function parseSchema(text: string): RayfinEntity[] {
   return entities;
 }
 
+// Merge entities parsed from several data/*.ts files, deduping by name. When the
+// same entity name appears twice (e.g. an empty re-export stub plus the real
+// definition), the richer entry wins so fields/roles/relations are preserved.
+export function mergeEntities(into: RayfinEntity[], add: RayfinEntity[]): RayfinEntity[] {
+  const out = [...into];
+  for (const e of add) {
+    const i = out.findIndex((x) => x.name === e.name);
+    if (i < 0) out.push(e);
+    else if (entityScore(e) > entityScore(out[i])) out[i] = e;
+  }
+  return out;
+}
+
+function entityScore(e: RayfinEntity): number {
+  return e.fields.length * 2 + (e.isEntity ? 1 : 0) + e.roles.length;
+}
+
+// Extract the registered entity names from schema.ts — either the runtime
+// `export const schema = [User, Project, ...]` array or the `type *Schema = {
+// User: User; ... }` registration. Tolerant: returns [] when neither is present,
+// so the caller falls back to scanning every data/*.ts file.
+export function parseSchemaRegistration(text: string): string[] {
+  const names: string[] = [];
+  const arr = text.match(/\bschema\s*=\s*\[([^\]]*)\]/);
+  if (arr) {
+    for (const m of arr[1].matchAll(/[A-Za-z_$][\w$]*/g)) names.push(m[0]);
+  }
+  if (!names.length) {
+    const typ = text.match(/\btype\s+\w*Schema\s*=\s*\{([^}]*)\}/);
+    if (typ) {
+      for (const line of typ[1].split(/[;,\n]/)) {
+        const k = line.match(/^\s*([A-Za-z_$][\w$]*)\s*:/);
+        if (k) names.push(k[1]);
+      }
+    }
+  }
+  return [...new Set(names)];
+}
+
 function buildField(name: string, marker: string, decs: Decorator[]): RayfinField {
   const relation = decs.find((d) => d.name === "one" || d.name === "many");
   const optional =
@@ -398,12 +437,31 @@ export async function readRayfinState(cwd: string): Promise<RayfinState> {
       };
     });
 
-  // Data model: parse the schema, then enrich with DAB permissions when present.
-  const schemaPath = existsSyncSafe(path.join(dir, "data", "schema.ts"))
-    ? path.join(dir, "data", "schema.ts")
+  // Data model: parse every entity file under data/, then enrich with DAB perms.
+  // Canonical Rayfin defines each @entity in its own data/<Entity>.ts and only
+  // registers them in data/schema.ts, so parsing schema.ts alone misses them.
+  // Scanning all data/*.ts also still handles the inline-in-schema.ts layout.
+  const dataDir = path.join(dir, "data");
+  const schemaPath = existsSyncSafe(path.join(dataDir, "schema.ts"))
+    ? path.join(dataDir, "schema.ts")
     : null;
   const schemaText = schemaPath ? await readText(schemaPath) : null;
-  let entities = schemaText ? parseSchema(schemaText) : [];
+  let entities: RayfinEntity[] = [];
+  for (const file of await listFiles(dataDir, ".ts")) {
+    const text = await readText(path.join(dataDir, file));
+    if (text) entities = mergeEntities(entities, parseSchema(text));
+  }
+  // schema.ts is the canonical registration: when it lists entities (`export
+  // const schema = [...]` or `type *Schema = { Name: Name }`), use it as the
+  // authoritative set + order — so unregistered helper/draft classes in data/
+  // don't leak in and the display order is meaningful. Only override when the
+  // registration actually resolves to known entities, else keep the full scan.
+  const registered = schemaText ? parseSchemaRegistration(schemaText) : [];
+  if (registered.length) {
+    const byName = new Map(entities.map((e) => [e.name, e]));
+    const ordered = registered.map((n) => byName.get(n)).filter((e): e is RayfinEntity => !!e);
+    if (ordered.length) entities = ordered;
+  }
   const dabPath = path.join(dir, "dab-config.json");
   const hasDabConfig = existsSyncSafe(dabPath);
   if (hasDabConfig) {
@@ -511,6 +569,19 @@ async function listDirs(dir: string): Promise<string[]> {
     const entries = await readdir(dir, { withFileTypes: true });
     return entries
       .filter((e) => e.isDirectory())
+      .map((e) => e.name)
+      .sort();
+  } catch {
+    return [];
+  }
+}
+
+// Top-level files in `dir` with the given extension, sorted for determinism.
+async function listFiles(dir: string, ext: string): Promise<string[]> {
+  try {
+    const entries = await readdir(dir, { withFileTypes: true });
+    return entries
+      .filter((e) => e.isFile() && e.name.endsWith(ext))
       .map((e) => e.name)
       .sort();
   } catch {

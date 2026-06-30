@@ -9,7 +9,9 @@ import {
   hasLocalRayfinBin,
   hasRayfinAgentFiles,
   interpretLoginStatus,
+  mergeEntities,
   parseSchema,
+  parseSchemaRegistration,
   parseYml,
   rayfinLoginStatusArgv,
   readInstalledRayfinVersion,
@@ -170,6 +172,169 @@ describe("readRayfinState DAB enrichment", () => {
     expect("auth" in state).toBe(true);
     if (!("auth" in state)) return;
     expect(state.auth.signedIn).toBeNull();
+  });
+});
+
+describe("readRayfinState per-entity-file layout", () => {
+  let dir: string;
+
+  afterEach(async () => {
+    if (dir) await rm(dir, { recursive: true, force: true });
+  });
+
+  it("surfaces entities defined in their own data/<Entity>.ts (schema.ts only registers)", async () => {
+    dir = await mkdtemp(path.join(os.tmpdir(), "np-rayfin-"));
+    const data = path.join(dir, "rayfin", "data");
+    await mkdir(data, { recursive: true });
+    // Canonical Rayfin: schema.ts aggregates/registers, the @entity lives elsewhere.
+    await writeFile(
+      path.join(data, "schema.ts"),
+      `import { Todo } from './Todo.js';
+       export type AppSchema = { Todo: Todo };
+       export const schema = [Todo];
+      `,
+    );
+    await writeFile(
+      path.join(data, "Todo.ts"),
+      `import { entity, role, uuid, text, boolean } from '@microsoft/rayfin-core';
+       @entity()
+       @role('authenticated', '*', { policy: (c, i) => c.sub.eq(i.user_id) })
+       export class Todo {
+         @uuid() id!: string;
+         @text({ max: 100 }) title!: string;
+         @boolean() isCompleted!: boolean;
+         @text() user_id!: string;
+       }
+      `,
+    );
+
+    const state = await readRayfinState(dir);
+    expect("entities" in state).toBe(true);
+    if (!("entities" in state)) return;
+    const todo = state.entities.find((e) => e.name === "Todo");
+    expect(todo).toBeTruthy();
+    expect(todo?.isEntity).toBe(true);
+    expect(todo?.roles).toContain("authenticated");
+    expect(todo?.fields.map((f) => f.name)).toEqual(["id", "title", "isCompleted", "user_id"]);
+  });
+
+  it("merges entities across files and resolves cross-file relations", async () => {
+    dir = await mkdtemp(path.join(os.tmpdir(), "np-rayfin-"));
+    const data = path.join(dir, "rayfin", "data");
+    await mkdir(data, { recursive: true });
+    await writeFile(path.join(data, "schema.ts"), "export const schema = [];\n");
+    await writeFile(
+      path.join(data, "User.ts"),
+      `import { role, uuid, many } from '@microsoft/rayfin-core';
+       import { Project } from './Project.js';
+       @role('member')
+       export class User {
+         @uuid() id!: string;
+         @many(() => Project) projects!: Project[];
+       }
+      `,
+    );
+    await writeFile(
+      path.join(data, "Project.ts"),
+      `import { entity, uuid, one } from '@microsoft/rayfin-core';
+       import { User } from './User.js';
+       @entity()
+       export class Project {
+         @uuid() id!: string;
+         @one(() => User) owner!: User;
+       }
+      `,
+    );
+
+    const state = await readRayfinState(dir);
+    expect("entities" in state).toBe(true);
+    if (!("entities" in state)) return;
+    const names = state.entities.map((e) => e.name).sort();
+    expect(names).toEqual(["Project", "User"]);
+    const user = state.entities.find((e) => e.name === "User");
+    expect(user?.fields.find((f) => f.name === "projects")?.relation).toEqual({
+      kind: "many",
+      target: "Project",
+    });
+    const project = state.entities.find((e) => e.name === "Project");
+    expect(project?.fields.find((f) => f.name === "owner")?.relation).toEqual({
+      kind: "one",
+      target: "User",
+    });
+  });
+
+  it("dedupes by name, keeping the richer definition over an empty re-export stub", () => {
+    const stub = [{ name: "Todo", isEntity: false, roles: [], fields: [], permissions: [] }];
+    const real = [
+      {
+        name: "Todo",
+        isEntity: true,
+        roles: ["authenticated"],
+        fields: [{ name: "id", type: "uuid", optional: false, relation: null }],
+        permissions: [],
+      },
+    ];
+    // Order-independent: the richer entry wins whether seen first or last.
+    expect(mergeEntities(stub, real)[0]).toEqual(real[0]);
+    expect(mergeEntities(real, stub)[0]).toEqual(real[0]);
+  });
+
+  it("uses schema.ts registration as the authoritative set + order, excluding unregistered classes", async () => {
+    dir = await mkdtemp(path.join(os.tmpdir(), "np-rayfin-"));
+    const data = path.join(dir, "rayfin", "data");
+    await mkdir(data, { recursive: true });
+    // Registration lists Project then User (reverse of alphabetical filenames) and
+    // omits Draft — Draft must not appear and order must follow the registration.
+    await writeFile(
+      path.join(data, "schema.ts"),
+      `import { Project } from './Project.js';
+       import { User } from './User.js';
+       export const schema = [Project, User];
+      `,
+    );
+    await writeFile(
+      path.join(data, "User.ts"),
+      `import { role, uuid } from '@microsoft/rayfin-core';
+       @role('member') export class User { @uuid() id!: string; }
+      `,
+    );
+    await writeFile(
+      path.join(data, "Project.ts"),
+      `import { entity, uuid } from '@microsoft/rayfin-core';
+       @entity() export class Project { @uuid() id!: string; }
+      `,
+    );
+    // An unregistered helper class living in data/ — must be filtered out.
+    await writeFile(
+      path.join(data, "Draft.ts"),
+      `import { entity, uuid } from '@microsoft/rayfin-core';
+       @entity() export class Draft { @uuid() id!: string; }
+      `,
+    );
+
+    const state = await readRayfinState(dir);
+    expect("entities" in state).toBe(true);
+    if (!("entities" in state)) return;
+    expect(state.entities.map((e) => e.name)).toEqual(["Project", "User"]);
+  });
+});
+
+describe("parseSchemaRegistration", () => {
+  it("reads the `export const schema = [...]` array (in order)", () => {
+    expect(parseSchemaRegistration("export const schema = [User, Category, Project];")).toEqual([
+      "User",
+      "Category",
+      "Project",
+    ]);
+  });
+  it("falls back to the `type *Schema = { Name: Name }` keys", () => {
+    expect(
+      parseSchemaRegistration("export type TodoAppSchema = { Todo: Todo; Tag: Tag };"),
+    ).toEqual(["Todo", "Tag"]);
+  });
+  it("returns [] for an empty array or no registration (caller scans all files)", () => {
+    expect(parseSchemaRegistration("export const schema = [];")).toEqual([]);
+    expect(parseSchemaRegistration("@entity() export class Foo {}")).toEqual([]);
   });
 });
 
