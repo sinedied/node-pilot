@@ -3648,10 +3648,10 @@ $("#tab-rayfin").addEventListener("click", async (e) => {
   if (r && r.started === false && r.reason) toast(r.reason);
 });
 
-// "Start local": the local-with-remote-backend dev flow isn't wired yet, so this
-// just launches the project's dev server (the Preview tab's Dev lane) and
-// switches to Preview — same as clicking Start there.
-$("#rf-start-local")?.addEventListener("click", () => {
+// "Start env": launches the project's dev server (the Preview tab's Dev lane) and
+// switches to Preview — same as clicking Start there. Named "env" rather than
+// "local" because for a Rayfin app the dev server talks to the remote backend.
+$("#rf-start-env")?.addEventListener("click", () => {
   api("/api/dev/start", {});
   showTab("preview");
 });

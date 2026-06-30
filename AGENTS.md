@@ -462,10 +462,12 @@ inspiration: [coffilot](https://github.com/jdubois/coffilot). Full design in
     Cockpit doesn't surface yet.
   - **Local-dev controls were removed (Item 1).** Local-with-remote-backend dev isn't wired,
     so the `dev stop` / `dev status` / `dev db apply` ("Apply to local") buttons were
-    **deleted** from `index.html` (re-add them when it lands). **"Start local"**
-    (`#rf-start-local`) remains, repurposed to launch the project's dev server — it calls
-    `/api/dev/start` + `showTab("preview")`, exactly like the Preview tab's Start. The
-    Fabric-section `up status` / `up db apply` ("Apply to Fabric") buttons are real and stay.
+    **deleted** from `index.html` (re-add them when it lands). **"Start env"**
+    (`#rf-start-env`, formerly "Start local") remains, repurposed to launch the project's dev
+    server — it calls `/api/dev/start` + `showTab("preview")`, exactly like the Preview tab's
+    Start. Named "env" not "local" because for a Rayfin app that dev server talks to the
+    **remote** backend. The Fabric-section `up status` / `up db apply` ("Apply to Fabric")
+    buttons are real and stay.
   - **Agent files (Item 5):** `hasRayfinAgentFiles()` checks the CLI's `rayfin/.lockfile.json`
     marker (falls back to `AGENTS.md` + `.mcp.json`). The "Set up agent files" button runs the
     real `init ai-files install` lane, uses a non-Copilot icon (`oct-tools` — it's a CLI
