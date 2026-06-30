@@ -84,14 +84,17 @@ inspiration: [coffilot](https://github.com/jdubois/coffilot). Full design in
 - `e2e/` — **permanent dogfood fixtures**, its own npm **workspace root**
   (`package.json` with `workspaces:["*"]`, name `cockpit-e2e`) kept **out** of
   Cockpit's own install/lockfile so fixture deps never pollute Cockpit's
-  Dependencies/Audit tab. `e2e/rayfin-app/` is a mock Microsoft Rayfin project
-  (rayfin.yml + `@microsoft/rayfin*` deps + mock `rayfin/.deployments.json` / `.env` /
-  `dab-config.json` / `data/schema.ts` / `functions/`) so the **Rayfin tab renders
-  fully offline** (no Docker/Fabric/login/install). Excluded from Biome via `"!e2e"`
-  in `biome.json`; tsconfig/vitest/smoke already scope to `src`/`public`/`test`.
-  Dogfood by opening a Cockpit session at `e2e/rayfin-app/` (→ Rayfin tab) or at
-  `e2e/` (→ monorepo detection signal). Mock dotfiles contain **only fabricated**
-  values — never real secrets.
+  Dependencies/Audit tab. **Two Rayfin fixtures** (see the Rayfin gotcha for the split):
+  `e2e/rayfin-app/` (`rayfin-mock-app`) is the **offline mock** — committed real-schema
+  `rayfin/` files (`fabric*` `.deployments.json` + nested-provider `rayfin.yml` + `.env` /
+  `dab-config.json` / `data/schema.ts` / `functions/`) so the **Rayfin tab renders fully
+  offline** (no Docker/Fabric/login/install); `e2e/rayfin-todo-app/` (`rayfin-todo-app`) is
+  the **real, deployable** app (the official `todo-app-template`: real `@microsoft/rayfin-*`
+  deps, Vite + React) kept as **source only** for hands-on deploy testing. Both excluded from
+  Biome via `"!e2e"` in `biome.json`; tsconfig/vitest/smoke already scope to
+  `src`/`public`/`test`. Dogfood by opening a Cockpit session at `e2e/rayfin-app/` (→ offline
+  Rayfin tab), `e2e/rayfin-todo-app/` (→ real deploy/login flow) or `e2e/` (→ monorepo
+  detection signal). Mock dotfiles contain **only fabricated** values — never real secrets.
 - `.github/workflows/ci.yml` — CI (`biome ci .` → build → smoke → test) on Node 22.18 & 24.
 - `.github/workflows/release.yml` + `.releaserc.json` — semantic-release pipeline that cuts
   GitHub Releases on push to `main` (the Releases the self-update check reads back; see
@@ -438,6 +441,62 @@ inspiration: [coffilot](https://github.com/jdubois/coffilot). Full design in
   error/timeout/missing-CLI → **`auth.signedIn = null` ("Unknown")** — never collapsed to a
   false "Signed out". npm still passes `--no` (belt-and-suspenders against any prompt/fetch).
   The client chip renders Signed in / Signed out / Unknown accordingly.
+  - **Grounded in the real `@microsoft/rayfin-cli`, not the mock.** The model reads the
+    **real on-disk schemas**: `.deployments.json` records are `fabric*`-prefixed
+    (`fabricItemId` / `fabricApiUrl` / `fabricWorkspaceId` / `fabricTenantId` /
+    `fabricDeepLink` / `hostingUrl`), mapped to the client `RayfinDeployment` aliases
+    (`itemId`/`apiUrl`/`workspaceId`/`tenantId`/`portalUrl`/`hostingUrl`) with the
+    un-prefixed names kept as a **fallback** for hand-written fixtures. → **Open app** =
+    `hostingUrl`, **Open Fabric workspace** = `fabricDeepLink` (else `portalUrl`, else a URL
+    composed from the workspace GUID), **API endpoint** = `fabricApiUrl`. Reading only the
+    legacy names was the bug where a real deploy showed *only* "Open app". `rayfin.yml` auth
+    methods derive from the **nested provider blocks** (`auth.fabric.enabled` /
+    `auth.password.enabled` / `auth.email.enabled`), with the flat `auth.methods:` list as a
+    fallback (`parseAuthMethods`).
+  - **`ALLOWED_COMMANDS`** lists only real, still-wired shapes: `login`, `logout`, `up`,
+    `up status`, `up db apply`, `functions typegen`, `connector list`, `init ai-files
+    install`. The fabricated `dev start`/`dev stop`/`dev status`/`dev db apply` and the old
+    `ai-files` shape were dropped — `rayfin dev` is a **Docker-based local backend** that
+    Cockpit doesn't surface yet.
+  - **Local-dev is hidden, not removed (Item 1).** Local-with-remote-backend isn't wired, so
+    the `dev stop` / `dev status` / `dev db apply` ("Apply to local") buttons carry a plain
+    `hidden` attribute in `index.html` (kept for when it lands). **"Start local"**
+    (`#rf-start-local`) is repurposed to launch the project's dev server — it calls
+    `/api/dev/start` + `showTab("preview")`, exactly like the Preview tab's Start.
+  - **Agent files (Item 5):** `hasRayfinAgentFiles()` checks the CLI's `rayfin/.lockfile.json`
+    marker (falls back to `AGENTS.md` + `.mcp.json`). The "Set up agent files" button runs the
+    real `init ai-files install` lane, uses a non-Copilot icon (`oct-tools` — it's a CLI
+    action), and is **hidden once `hasAgentFiles` is true** (`renderRayfin`).
+  - **Add + switch workspaces (Item 3):** the switcher menu (`renderRayfinSwitchMenu`) ends
+    with an **"+ Add workspace…"** item that swaps in an inline target input
+    (`showRayfinAddWorkspaceForm`) and hands off to the same `POST /api/rayfin/deploy
+    { workspace }` path as the header Deploy button (the server picks `--workspace` /
+    `--workspace-id` / `--workspace-uri` by value shape). The toggle is enabled with ≥1
+    deployment (the first deploy still goes through the header Deploy button / empty state).
+  - **Version + self-update (Item 6):** `readInstalledRayfinVersion(cwd)` reads the installed
+    version offline from `node_modules/@microsoft/rayfin-cli` (fallback `-core`, walks up for
+    hoisted monorepos), surfaced as `RayfinState.cli.installed`. `src/rayfin-update.ts`
+    (SDK-free, unit-tested, mirrors `src/update.ts`) checks the **npm registry**
+    (`registry.npmjs.org/@microsoft/rayfin-cli/latest`, 5s timeout, injectable fetch, every
+    failure non-fatal → `error:true`, never a false "update available"). The controller owns
+    the network call + cache: `getRayfinUpdateInfo(force)` (6h throttle + in-flight guard +
+    `_projectGen` stale-guard; merges the result into `_rayfin.cli` and broadcasts
+    `rayfin:state`) and `sendCopilotRayfinUpdate()` (hands Copilot the version-locked
+    `@microsoft/rayfin-*` bump-and-verify prompt via `buildRayfinUpdatePrompt`). Routes:
+    `POST /api/rayfin/update/check` / `…/apply`. The header (`#rf-head`) shows `Rayfin vX.Y.Z`
+    + an accent "update available" badge + a gradient **Update Rayfin** `.copilot-btn` (a
+    recurring Copilot handoff — project-scoped, **not** `[data-global]`, unlike the
+    extension self-update). The client fires the check once per installed version on Rayfin
+    load (`cli.checkedAt == null`).
+  - **Two e2e fixtures (Item 4):** `e2e/rayfin-app/` is the **offline mock**
+    (`rayfin-mock-app`) — its committed `rayfin/` files now use the **real** schema
+    (`fabric*` deployment fields + nested-provider `rayfin.yml`) so the offline render matches
+    a real deploy (all three deployment links appear). `e2e/rayfin-todo-app/`
+    (`rayfin-todo-app`) is the **real, deployable** app — the official `todo-app-template`
+    (real `@microsoft/rayfin-*` deps, Vite + React), kept as **source only** (excluded from
+    Cockpit's install/lockfile, biome, tsc, vitest, smoke). The two can't share a package name
+    (same `e2e` workspace root), hence the mock's `rayfin-mock-app` rename. A deploy's
+    `rayfin/.env` is auto-gitignored (`*.env*`); the mock's `.env` is already tracked.
 
 ## Workflow
 
