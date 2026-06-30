@@ -242,7 +242,12 @@ inspiration: [coffilot](https://github.com/jdubois/coffilot). Full design in
 - **Auto-run on load**: when `autoProblems`/`autoTest`/`autoDeps` are on, the controller
   primes those tabs **once per project path** (`_autoRanFor` set, keyed by cwd so a shared
   process can serve several projects) after the first project detection, only for
-  available tools (`runAutoTasks()` in `controller.ts`). `autoProblems` primes the
+  available tools (`runAutoTasks()` in `controller.ts`). The three groups run
+  **concurrently** (`Promise.all`): **Problems** (lint → TS, sequential within the group
+  since they share the TS fs-watchers/idle setup), **Tests** (`runTests`), and **Deps**
+  (`listOutdated` ∥ `runAudit`, two independent npm spawns). Serial awaits here made the
+  pills populate one-by-one over many seconds; each method writes a distinct state slice
+  and keeps its own `_projectGen` guard, so concurrency is safe. `autoProblems` primes the
   **Problems** tab via the live-diagnostics path — `getLintDiagnostics()` + `getDiagnostics()`
   (NOT the lint *lane*) — so `this.lint`/`this.tsLs` populate the boot snapshot and broadcast,
   making the Problems pill show on load/after reload. It sets `_autoRunning` so the

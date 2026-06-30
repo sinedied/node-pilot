@@ -913,6 +913,9 @@ export class Controller {
   // ---- Auto-run on load ----------------------------------------------------
 
   // Run the user's configured on-load tasks once, for available lanes only.
+  // The three groups (Problems, Tests, Deps) are independent — they spawn
+  // different tools and write distinct state slices — so they run concurrently
+  // instead of one after another (each method keeps its own `_projectGen` guard).
   private async runAutoTasks(): Promise<void> {
     const d = this.detection;
     if (!d?.hasProject) return;
@@ -920,18 +923,26 @@ export class Controller {
     const a = d.availability;
     this._autoRunning = true;
     try {
+      const groups: Promise<unknown>[] = [];
       // Prime the Problems tab (live lint + TS diagnostics) so its pill populates
       // on load — this fills this.lint/this.tsLs (carried in the boot snapshot)
-      // and broadcasts lint:/ts: diagnostics to connected clients.
+      // and broadcasts lint:/ts: diagnostics to connected clients. Lint then TS
+      // stay sequential within the group (they share the TS fs-watchers/idle setup).
       if (s.autoProblems) {
-        if (a?.lint !== false) await this.getLintDiagnostics().catch(() => {});
-        if (a?.diagnostics !== false) await this.getDiagnostics().catch(() => {});
+        groups.push(
+          (async () => {
+            if (a?.lint !== false) await this.getLintDiagnostics().catch(() => {});
+            if (a?.diagnostics !== false) await this.getDiagnostics().catch(() => {});
+          })(),
+        );
       }
-      if (s.autoTest && a?.test !== false) await this.runTests().catch(() => {});
+      if (s.autoTest && a?.test !== false) groups.push(this.runTests().catch(() => {}));
       if (s.autoDeps) {
-        await this.listOutdated().catch(() => {});
-        await this.runAudit().catch(() => {});
+        groups.push(
+          Promise.all([this.listOutdated().catch(() => {}), this.runAudit().catch(() => {})]),
+        );
       }
+      await Promise.all(groups);
     } finally {
       this._autoRunning = false;
     }
