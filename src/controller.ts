@@ -1693,7 +1693,7 @@ export class Controller {
 
   // Shared lane runner for the Rayfin CLI buttons. Streams to the Console like
   // build/lint, then refreshes the dashboard model. Distinct `laneId`s per
-  // command keep e.g. `dev stop` runnable while `dev start`'s lane is busy.
+  // command keep e.g. `up status` runnable while `up db apply`'s lane is busy.
   private async runRayfinLane(
     laneId: string,
     label: string,

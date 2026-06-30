@@ -609,9 +609,6 @@
               title="Start the local dev server (Preview tab)">
               <svg class="oi" aria-hidden="true"><use href="#oct-play" /></svg>Start local
             </button>
-            <!-- Local-with-remote-backend dev isn't wired yet; markup kept for when it lands. -->
-            <button type="button" class="lane-btn" data-rf-cli="dev stop" hidden>Stop</button>
-            <button type="button" class="lane-btn" data-rf-cli="dev status" hidden>Status</button>
           </div>
           <div id="rf-env" class="rf-env"></div>
         </div>
@@ -659,10 +656,6 @@
               <button type="button" data-view="list" class="on">List</button>
               <button type="button" data-view="graph">Graph</button>
             </div>
-            <!-- "Apply to local" targets the not-yet-wired local backend; kept hidden. -->
-            <button type="button" class="lane-btn" data-rf-cli="dev db apply" hidden>
-              <svg class="oi" aria-hidden="true"><use href="#oct-sync" /></svg>Apply to local
-            </button>
             <button type="button" class="lane-btn" data-rf-cli="up db apply">Apply to Fabric</button>
           </div>
           <div id="rf-model" class="rf-model">

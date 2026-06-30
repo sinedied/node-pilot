@@ -458,11 +458,12 @@ inspiration: [coffilot](https://github.com/jdubois/coffilot). Full design in
     install`. The fabricated `dev start`/`dev stop`/`dev status`/`dev db apply` and the old
     `ai-files` shape were dropped — `rayfin dev` is a **Docker-based local backend** that
     Cockpit doesn't surface yet.
-  - **Local-dev is hidden, not removed (Item 1).** Local-with-remote-backend isn't wired, so
-    the `dev stop` / `dev status` / `dev db apply` ("Apply to local") buttons carry a plain
-    `hidden` attribute in `index.html` (kept for when it lands). **"Start local"**
-    (`#rf-start-local`) is repurposed to launch the project's dev server — it calls
-    `/api/dev/start` + `showTab("preview")`, exactly like the Preview tab's Start.
+  - **Local-dev controls were removed (Item 1).** Local-with-remote-backend dev isn't wired,
+    so the `dev stop` / `dev status` / `dev db apply` ("Apply to local") buttons were
+    **deleted** from `index.html` (re-add them when it lands). **"Start local"**
+    (`#rf-start-local`) remains, repurposed to launch the project's dev server — it calls
+    `/api/dev/start` + `showTab("preview")`, exactly like the Preview tab's Start. The
+    Fabric-section `up status` / `up db apply` ("Apply to Fabric") buttons are real and stay.
   - **Agent files (Item 5):** `hasRayfinAgentFiles()` checks the CLI's `rayfin/.lockfile.json`
     marker (falls back to `AGENTS.md` + `.mcp.json`). The "Set up agent files" button runs the
     real `init ai-files install` lane, uses a non-Copilot icon (`oct-tools` — it's a CLI
