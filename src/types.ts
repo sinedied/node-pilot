@@ -163,6 +163,16 @@ export interface RayfinState {
   entities: RayfinEntity[];
   functions: string[];
   connectors: string[];
+  // Installed Rayfin CLI/SDK version + the (network) update check. `installed`
+  // is a cheap sync read; the rest are filled by the controller's throttled,
+  // non-fatal npm-registry check (latest=null / error=true when unknown).
+  cli: {
+    installed: string | null;
+    latest: string | null;
+    updateAvailable: boolean;
+    checkedAt: number | null;
+    error: boolean;
+  };
   hasDabConfig: boolean;
   hasAgentFiles: boolean;
   paths: { config: string | null; schema: string | null; deployments: string | null };

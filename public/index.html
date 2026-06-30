@@ -573,7 +573,16 @@
             <span id="rf-app-name">Rayfin</span>
           </h2>
           <span id="rf-dialect" class="rf-chip muted hidden"></span>
+          <span id="rf-version" class="rf-chip muted hidden" title="Installed Rayfin version"></span>
+          <span id="rf-update-badge" class="info-meta-badge hidden">Update available</span>
           <span class="grow"></span>
+          <button type="button"
+            id="rf-update"
+            class="copilot-btn hidden"
+            title="Update Rayfin to the latest version with Copilot"
+          >
+            <svg class="oi" aria-hidden="true"><use href="#oct-sync" /></svg>Update Rayfin
+          </button>
           <button type="button"
             id="rf-refresh"
             class="icon-btn"
@@ -596,11 +605,13 @@
             <button type="button" class="lane-btn" data-rf-cli="login">
               <svg class="oi" aria-hidden="true"><use href="#oct-sign-in" /></svg>Sign in
             </button>
-            <button type="button" class="lane-btn" data-rf-cli="dev start">
+            <button type="button" class="lane-btn" id="rf-start-local"
+              title="Start the local dev server (Preview tab)">
               <svg class="oi" aria-hidden="true"><use href="#oct-play" /></svg>Start local
             </button>
-            <button type="button" class="lane-btn" data-rf-cli="dev stop">Stop</button>
-            <button type="button" class="lane-btn" data-rf-cli="dev status">Status</button>
+            <!-- Local-with-remote-backend dev isn't wired yet; markup kept for when it lands. -->
+            <button type="button" class="lane-btn" data-rf-cli="dev stop" hidden>Stop</button>
+            <button type="button" class="lane-btn" data-rf-cli="dev status" hidden>Status</button>
           </div>
           <div id="rf-env" class="rf-env"></div>
         </div>
@@ -648,7 +659,8 @@
               <button type="button" data-view="list" class="on">List</button>
               <button type="button" data-view="graph">Graph</button>
             </div>
-            <button type="button" class="lane-btn" data-rf-cli="dev db apply">
+            <!-- "Apply to local" targets the not-yet-wired local backend; kept hidden. -->
+            <button type="button" class="lane-btn" data-rf-cli="dev db apply" hidden>
               <svg class="oi" aria-hidden="true"><use href="#oct-sync" /></svg>Apply to local
             </button>
             <button type="button" class="lane-btn" data-rf-cli="up db apply">Apply to Fabric</button>
@@ -700,8 +712,9 @@
               <svg class="oi" aria-hidden="true"><use href="#oct-checklist" /></svg>Docs &amp; agent setup
             </h3>
             <span class="grow"></span>
-            <button type="button" class="lane-btn" data-rf-cli="ai-files">
-              <svg class="oi" aria-hidden="true"><use href="#oct-copilot" /></svg>Set up agent files
+            <button type="button" class="lane-btn" id="rf-agentfiles"
+              data-rf-cli="init ai-files install">
+              <svg class="oi" aria-hidden="true"><use href="#oct-tools" /></svg>Set up agent files
             </button>
           </div>
           <div id="rf-docs" class="rf-docs"></div>

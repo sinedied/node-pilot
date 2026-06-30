@@ -826,6 +826,74 @@ function renderRayfinSwitchMenu() {
     item.addEventListener("click", () => selectRayfinWorkspace(d.name));
     menu.append(item);
   }
+  // "+ Add workspace…" — deploy to a new/alternate Fabric workspace so the user
+  // can switch between several. Opens an inline target input (name / GUID / URL)
+  // that hands off to the same deploy path as the header Deploy button.
+  const sep = document.createElement("div");
+  sep.className = "menu-sep";
+  const add = document.createElement("button");
+  add.type = "button";
+  add.id = "rf-add-workspace";
+  add.className = "more-menu-item";
+  add.setAttribute("role", "menuitem");
+  add.innerHTML = '<svg class="oi" aria-hidden="true"><use href="#oct-plus" /></svg>Add workspace…';
+  add.addEventListener("click", (e) => {
+    e.stopPropagation();
+    showRayfinAddWorkspaceForm();
+  });
+  menu.append(sep, add);
+}
+
+// Swap the switcher menu for an inline "deploy to a new workspace" form. On
+// submit it calls the deploy endpoint (the server resolves --workspace /
+// --workspace-id / --workspace-uri from the value shape), then closes.
+function showRayfinAddWorkspaceForm() {
+  const menu = $("#rf-switch-menu");
+  if (!menu) return;
+  menu.innerHTML = "";
+  const form = document.createElement("div");
+  form.className = "rf-add-workspace";
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "rf-input";
+  input.placeholder = "Name, ID, or portal URL";
+  input.setAttribute("aria-label", "New Fabric workspace (name, ID, or portal URL)");
+  const row = document.createElement("div");
+  row.className = "rf-add-workspace-actions";
+  const submit = document.createElement("button");
+  submit.type = "button";
+  submit.className = "lane-btn primary";
+  submit.innerHTML = '<svg class="oi" aria-hidden="true"><use href="#oct-rocket" /></svg>Deploy';
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.className = "lane-btn task";
+  cancel.textContent = "Cancel";
+  const go = async () => {
+    const workspace = input.value.trim();
+    if (!workspace) {
+      input.focus();
+      return;
+    }
+    closeRayfinSwitchMenu();
+    const r = await api("/api/rayfin/deploy", { workspace });
+    if (r && r.started === false && r.reason) toast(r.reason);
+  };
+  submit.addEventListener("click", (e) => {
+    e.stopPropagation();
+    go();
+  });
+  cancel.addEventListener("click", (e) => {
+    e.stopPropagation();
+    closeRayfinSwitchMenu();
+  });
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") go();
+    else if (e.key === "Escape") closeRayfinSwitchMenu();
+  });
+  row.append(submit, cancel);
+  form.append(input, row);
+  menu.append(form);
+  input.focus();
 }
 
 async function selectRayfinWorkspace(name) {
@@ -1354,6 +1422,7 @@ function renderRayfin() {
     // so only replace the list pane's content — wiping #rf-model would destroy
     // the children renderRayfinModel() needs and leave the section stuck loading.
     resetRayfinTransient();
+    renderRayfinVersion(null);
     const ml = $("#rf-model-list");
     if (ml) ml.innerHTML = '<div class="rf-empty">Loading…</div>';
     $("#rf-model-count")?.classList.add("hidden");
@@ -1367,6 +1436,7 @@ function renderRayfin() {
     dialect.textContent = r.config.dialect;
     dialect.classList.remove("hidden");
   } else dialect.classList.add("hidden");
+  renderRayfinVersion(r.cli);
 
   // Environment
   const auth = $("#rf-auth-chip");
@@ -1434,11 +1504,60 @@ function renderRayfin() {
   const agentMsg = r.hasAgentFiles
     ? '<span class="rf-chip ok">Agent files present</span>'
     : '<span class="rf-chip muted">Agent files not set up</span>';
+  // The "Set up agent files" button only makes sense before they're installed
+  // (`rayfin init ai-files install` is the underlying CLI command).
+  $("#rf-agentfiles")?.classList.toggle("hidden", !!r.hasAgentFiles);
   const links = (r.links && r.links.length ? r.links : RAYFIN_LINKS)
     .map((l) => rfLink(l.label, l.url, l.icon))
     .join("");
   $("#rf-docs").innerHTML = `<div class="rf-kv"><span>Agent setup</span><div>${agentMsg}</div></div>
     <div class="rf-links rf-docs-links">${links}</div>`;
+}
+
+// Render the installed Rayfin version chip + the "update available" affordance in
+// the header. The installed version is read offline (sync); the latest/update
+// fields come from a throttled, non-fatal npm-registry check the controller owns.
+// On first sight of an installed version we kick that check off once (the server
+// throttles + coalesces, and the result rides back on a `rayfin:state` event).
+let rayfinUpdateChecking = false;
+function renderRayfinVersion(cli) {
+  cli = cli || {};
+  const versionEl = $("#rf-version");
+  const badge = $("#rf-update-badge");
+  const btn = $("#rf-update");
+  if (versionEl) {
+    if (cli.installed) {
+      versionEl.textContent = `Rayfin v${cli.installed}`;
+      versionEl.classList.remove("hidden");
+    } else versionEl.classList.add("hidden");
+  }
+  const canUpdate = !!cli.updateAvailable && !!cli.latest;
+  badge?.classList.toggle("hidden", !canUpdate);
+  if (btn) {
+    btn.classList.toggle("hidden", !canUpdate);
+    btn.title = canUpdate
+      ? `Update Rayfin to v${cli.latest} with Copilot`
+      : "Update Rayfin to the latest version with Copilot";
+  }
+  // Kick off the network check when the server hasn't checked this project's
+  // version yet (`checkedAt == null`). An in-flight flag (not a version key)
+  // guards against re-firing while a check runs — it's cleared when the request
+  // settles (success or failure), so a project switch to another Rayfin project
+  // (server cache reset → `checkedAt` null again) re-triggers the check, and a
+  // transient failure doesn't leave the client permanently stuck. A failed check
+  // still sets `checkedAt`, so this won't loop on persistent errors.
+  if (cli.installed && cli.checkedAt == null) {
+    if (!rayfinUpdateChecking) {
+      rayfinUpdateChecking = true;
+      api("/api/rayfin/update/check", {})
+        .catch(() => {})
+        .finally(() => {
+          rayfinUpdateChecking = false;
+        });
+    }
+  } else {
+    rayfinUpdateChecking = false;
+  }
 }
 
 // ---- Tasks (unified pinned lanes + scripts) -------------------------------
@@ -3527,6 +3646,27 @@ $("#tab-rayfin").addEventListener("click", async (e) => {
   const workspace = input ? input.value.trim() : "";
   const r = await api("/api/rayfin/deploy", { workspace });
   if (r && r.started === false && r.reason) toast(r.reason);
+});
+
+// "Start local": the local-with-remote-backend dev flow isn't wired yet, so this
+// just launches the project's dev server (the Preview tab's Dev lane) and
+// switches to Preview — same as clicking Start there.
+$("#rf-start-local")?.addEventListener("click", () => {
+  api("/api/dev/start", {});
+  showTab("preview");
+});
+
+// "Update Rayfin": hand the version-locked @microsoft/rayfin-* bump to Copilot.
+$("#rf-update")?.addEventListener("click", async (e) => {
+  const btn = e.currentTarget;
+  setDepsBusy(btn, true);
+  try {
+    const r = await api("/api/rayfin/update/apply", {});
+    if (r && r.ok === false) toast(r.reason || "Rayfin is up to date.");
+    else toast("Sent the Rayfin update request to Copilot.");
+  } finally {
+    setDepsBusy(btn, false);
+  }
 });
 
 $("#rf-switch-toggle").addEventListener("click", (e) => {

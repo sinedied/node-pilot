@@ -47,6 +47,11 @@ import {
   hasLocalRayfinBin,
   interpretLoginStatus,
 } from "./rayfin.ts";
+import {
+  checkRayfinUpdate,
+  buildRayfinUpdatePrompt,
+  type RayfinUpdateInfo,
+} from "./rayfin-update.ts";
 import { enumerateProjects } from "./projects.ts";
 import * as deps from "./deps.ts";
 import type { SafeUpdateOptions, SafeUpdateResult } from "./deps.ts";
@@ -208,6 +213,13 @@ export class Controller {
   _fetchImpl: typeof globalThis.fetch;
   _update: UpdateInfo | null;
   _updatePromise: Promise<UpdateInfo> | null;
+  // Rayfin CLI/SDK update check (project-scoped). Same throttle model as the
+  // self-update above, but the "latest" comes from the npm registry.
+  _rayfinUpdate: RayfinUpdateInfo | null;
+  _rayfinUpdatePromise: Promise<RayfinUpdateInfo> | null;
+  // The installed version the in-flight check was started for, so a stale
+  // promise is never reused after a project switch / in-place upgrade.
+  _rayfinUpdatePromiseFor: string | null;
 
   constructor(
     cwd: string,
@@ -223,6 +235,9 @@ export class Controller {
     this._fetchImpl = fetchImpl || globalThis.fetch;
     this._update = null;
     this._updatePromise = null;
+    this._rayfinUpdate = null;
+    this._rayfinUpdatePromise = null;
+    this._rayfinUpdatePromiseFor = null;
     this.events = new EventEmitter();
     this.events.setMaxListeners(100);
     this.detection = null;
@@ -464,6 +479,12 @@ export class Controller {
     this.fixContext = {};
     this.tsLs = this.freshTsLs();
     this.lint = this.freshLint();
+    // The Rayfin update check is keyed to the previous project's installed
+    // version; drop the cached result and invalidate any in-flight check so a
+    // stale result can't leak into the new project. The pending promise self-
+    // cleans via its identity guard in `getRayfinUpdateInfo`.
+    this._rayfinUpdate = null;
+    this._rayfinUpdatePromiseFor = null;
   }
 
   // ---- Lazy project stats (transitive deps + sizes) -----------------------
@@ -1602,6 +1623,7 @@ export class Controller {
     const signedIn = await this.probeRayfinSignedIn(cwd);
     if (this.cwd !== cwd) return next;
     next.auth.signedIn = signedIn;
+    this.overlayRayfinUpdate(next);
     this._rayfin = next;
     return next;
   }
@@ -1619,8 +1641,24 @@ export class Controller {
     const signedIn = await this.probeRayfinSignedIn(cwd);
     if (this.cwd !== cwd) return;
     next.auth.signedIn = signedIn;
+    this.overlayRayfinUpdate(next);
     this._rayfin = next;
     this.broadcast({ type: "rayfin:state", rayfin: next });
+  }
+
+  // Overlay the cached (network) Rayfin update result onto a freshly-read state.
+  // `readRayfinState` fills `cli.installed` synchronously; the latest/update
+  // fields come from the throttled `getRayfinUpdateInfo` check (or stay
+  // unknown). Only applies when the cached check is for the same installed
+  // version, so a stale result is never shown after an in-place upgrade.
+  private overlayRayfinUpdate(next: RayfinState): void {
+    const u = this._rayfinUpdate;
+    if (u && u.installedVersion === next.cli.installed) {
+      next.cli.latest = u.latestVersion;
+      next.cli.updateAvailable = u.updateAvailable;
+      next.cli.checkedAt = u.checkedAt;
+      next.cli.error = u.error;
+    }
   }
 
   // Ask the CLI whether the user is signed in (`rayfin login status`). The CLI is
@@ -1736,6 +1774,90 @@ export class Controller {
       value ? `rayfin up (${value})` : "rayfin up",
       rayfinArgv(d.pm, argv),
     );
+  }
+
+  // Check whether a newer Rayfin release is published (npm registry). Throttled
+  // like the self-update check; `force` bypasses the cache. Non-fatal: any
+  // failure keeps the last good result and surfaces `error`. Returns null when
+  // no Rayfin CLI/SDK is installed (nothing to compare against). On a fresh
+  // result it overlays the cached state + broadcasts so the header refreshes.
+  async getRayfinUpdateInfo(force = false): Promise<RayfinUpdateInfo | null> {
+    const installed = this._rayfin?.cli.installed ?? null;
+    if (!installed) return null;
+    const SIX_HOURS = 6 * 60 * 60 * 1000;
+    if (
+      !force &&
+      this._rayfinUpdate &&
+      this._rayfinUpdate.installedVersion === installed &&
+      Date.now() - this._rayfinUpdate.checkedAt < SIX_HOURS
+    ) {
+      return this._rayfinUpdate;
+    }
+    // Reuse an in-flight check only when it was started for the *same* installed
+    // version; a project switch / in-place upgrade clears `_rayfinUpdatePromiseFor`
+    // (see resetProjectState) so a stale check is never reused or awaited.
+    if (this._rayfinUpdatePromise && this._rayfinUpdatePromiseFor === installed) {
+      return this._rayfinUpdatePromise;
+    }
+    const gen = this._projectGen;
+    this._rayfinUpdatePromiseFor = installed;
+    const p: Promise<RayfinUpdateInfo> = checkRayfinUpdate(installed, {
+      fetchImpl: this._fetchImpl,
+    })
+      .then((info) => {
+        // Discard the result if the project switched or the installed version
+        // changed mid-check, so a stale check can't poison the cache or UI.
+        if (this._projectGen !== gen || this._rayfin?.cli.installed !== installed) {
+          return info;
+        }
+        // On a failed re-check keep the last good result (for this same version)
+        // but refresh the error timestamp.
+        if (
+          info.error &&
+          this._rayfinUpdate &&
+          !this._rayfinUpdate.error &&
+          this._rayfinUpdate.installedVersion === installed
+        ) {
+          this._rayfinUpdate = {
+            ...this._rayfinUpdate,
+            error: info.error,
+            checkedAt: info.checkedAt,
+          };
+        } else {
+          this._rayfinUpdate = info;
+        }
+        if (this._rayfin) {
+          this.overlayRayfinUpdate(this._rayfin);
+          this.broadcast({ type: "rayfin:state", rayfin: this._rayfin });
+        }
+        return this._rayfinUpdate;
+      })
+      .finally(() => {
+        // Only clear the slot if we still own it (a reset + new check may have
+        // replaced it while this one was in flight).
+        if (this._rayfinUpdatePromise === p) {
+          this._rayfinUpdatePromise = null;
+          this._rayfinUpdatePromiseFor = null;
+        }
+      });
+    this._rayfinUpdatePromise = p;
+    return p;
+  }
+
+  // "Update Rayfin": hand the version-locked `@microsoft/rayfin-*` bump (verify +
+  // rollback) to Copilot chat, mirroring `sendCopilotSelfUpdate`.
+  async sendCopilotRayfinUpdate(): Promise<{ ok: boolean; reason?: string }> {
+    const info = await this.getRayfinUpdateInfo();
+    if (!info?.updateAvailable || !info.latestVersion) {
+      return { ok: false, reason: "Rayfin is up to date." };
+    }
+    const prompt = buildRayfinUpdatePrompt({
+      installedVersion: info.installedVersion,
+      latestVersion: info.latestVersion,
+    });
+    await this.sendToChat(prompt);
+    this.log(`Asked Copilot to update Rayfin to v${info.latestVersion}.`);
+    return { ok: true };
   }
 
   // ---- Fix with Copilot ---------------------------------------------------

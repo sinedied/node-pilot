@@ -913,6 +913,29 @@ body {
   flex: 1;
 }
 
+/* Hairline divider between a popover's items and a trailing action (e.g. the
+   Rayfin switcher's "Add workspace…"). */
+.menu-sep {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--border-muted);
+}
+
+/* Inline "deploy to a new workspace" form that replaces the switcher menu. */
+.rf-add-workspace {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 6px;
+}
+.rf-add-workspace-actions {
+  display: flex;
+  gap: 6px;
+}
+.rf-add-workspace-actions .lane-btn {
+  flex: 1 1 auto;
+}
+
 /* Never let the dropdown exceed the (possibly very narrow) panel width — it is
    the last-resort navigation when every tab has collapsed. */
 #tab-more-menu {

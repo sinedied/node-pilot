@@ -210,6 +210,12 @@ async function handleApi(
       return sendJson(res, 202, { started: true });
     case "POST /api/rayfin/start":
       return sendJson(res, 200, await controller.startRayfinProject({ requireNoProject: true }));
+    case "POST /api/rayfin/update/check":
+      return sendJson(res, 200, await controller.getRayfinUpdateInfo(body.force === true));
+    case "POST /api/rayfin/update/apply": {
+      const result = await controller.sendCopilotRayfinUpdate();
+      return sendJson(res, result.ok ? 200 : 400, result);
+    }
     case "POST /api/debug/start":
       return sendJson(res, 200, await controller.debugStart(body));
     case "POST /api/debug/attach":

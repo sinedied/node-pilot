@@ -7,9 +7,12 @@ import os from "node:os";
 import path from "node:path";
 import {
   hasLocalRayfinBin,
+  hasRayfinAgentFiles,
   interpretLoginStatus,
   parseSchema,
+  parseYml,
   rayfinLoginStatusArgv,
+  readInstalledRayfinVersion,
   readRayfinState,
   rayfinWorkspaceFlag,
 } from "../src/rayfin.ts";
@@ -167,6 +170,217 @@ describe("readRayfinState DAB enrichment", () => {
     expect("auth" in state).toBe(true);
     if (!("auth" in state)) return;
     expect(state.auth.signedIn).toBeNull();
+  });
+});
+
+describe("readRayfinState deployment mapping", () => {
+  let dir: string;
+
+  afterEach(async () => {
+    if (dir) await rm(dir, { recursive: true, force: true });
+  });
+
+  it("reads the real fabric*-prefixed deployment fields (the Fabric workspace + API links)", async () => {
+    dir = await mkdtemp(path.join(os.tmpdir(), "np-rayfin-dep-"));
+    const rf = path.join(dir, "rayfin");
+    await mkdir(rf, { recursive: true });
+    await writeFile(
+      path.join(rf, ".deployments.json"),
+      JSON.stringify({
+        active: "prod",
+        deployments: {
+          prod: {
+            fabricItemId: "item-123",
+            fabricApiUrl: "https://app.example/api",
+            fabricWorkspaceId: "ws-456",
+            fabricTenantId: "tenant-789",
+            fabricDeepLink: "https://fabric.example/groups/ws-456/items/item-123",
+            hostingUrl: "https://app.example",
+            deployedAt: "2026-01-01T00:00:00.000Z",
+          },
+        },
+      }),
+    );
+    const state = await readRayfinState(dir);
+    const active = state.deployments.list.find((d) => d.active);
+    expect(active).toBeTruthy();
+    expect(active?.itemId).toBe("item-123");
+    expect(active?.apiUrl).toBe("https://app.example/api"); // API endpoint link
+    expect(active?.workspaceId).toBe("ws-456");
+    expect(active?.tenantId).toBe("tenant-789");
+    expect(active?.hostingUrl).toBe("https://app.example"); // Open app link
+    expect(active?.portalUrl).toBe("https://fabric.example/groups/ws-456/items/item-123"); // Open Fabric workspace
+  });
+
+  it("falls back to legacy/un-prefixed field names and composes a portal URL from the workspace id", async () => {
+    dir = await mkdtemp(path.join(os.tmpdir(), "np-rayfin-dep-"));
+    const rf = path.join(dir, "rayfin");
+    await mkdir(rf, { recursive: true });
+    await writeFile(
+      path.join(rf, ".deployments.json"),
+      JSON.stringify({
+        active: "legacy",
+        deployments: {
+          legacy: {
+            itemId: "old-item",
+            apiUrl: "https://legacy.example/api",
+            workspaceId: "old-ws",
+            hostingUrl: "https://legacy.example",
+          },
+        },
+      }),
+    );
+    const state = await readRayfinState(dir);
+    const active = state.deployments.list.find((d) => d.active);
+    expect(active?.itemId).toBe("old-item");
+    expect(active?.apiUrl).toBe("https://legacy.example/api");
+    expect(active?.workspaceId).toBe("old-ws");
+    // No deepLink/portalUrl on disk → composed from the workspace GUID.
+    expect(active?.portalUrl).toBe("https://app.fabric.microsoft.com/groups/old-ws");
+  });
+
+  it("treats empty prefixed fields as absent and falls back to a populated legacy alias", async () => {
+    dir = await mkdtemp(path.join(os.tmpdir(), "np-rayfin-dep-"));
+    const rf = path.join(dir, "rayfin");
+    await mkdir(rf, { recursive: true });
+    await writeFile(
+      path.join(rf, ".deployments.json"),
+      JSON.stringify({
+        active: "mixed",
+        deployments: {
+          mixed: {
+            fabricItemId: "",
+            fabricApiUrl: "   ",
+            fabricWorkspaceId: "",
+            apiUrl: "https://legacy.example/api",
+            workspaceId: "legacy-ws",
+            itemId: "legacy-item",
+            fabricDeepLink: "",
+            portalUrl: "https://legacy.example/portal",
+            hostingUrl: "",
+          },
+        },
+      }),
+    );
+    const state = await readRayfinState(dir);
+    const active = state.deployments.list.find((d) => d.active);
+    // Empty fabric* strings must not shadow the populated legacy aliases.
+    expect(active?.itemId).toBe("legacy-item");
+    expect(active?.apiUrl).toBe("https://legacy.example/api");
+    expect(active?.workspaceId).toBe("legacy-ws");
+    // Empty fabricDeepLink → legacy portalUrl.
+    expect(active?.portalUrl).toBe("https://legacy.example/portal");
+    // Empty hostingUrl normalizes to null (no broken "Open app" link).
+    expect(active?.hostingUrl).toBeNull();
+  });
+});
+
+describe("parseYml auth methods", () => {
+  it("derives auth methods from the real nested provider blocks", () => {
+    const yml = parseYml(`name: My App
+services:
+  auth:
+    enabled: true
+    fabric:
+      enabled: true
+    password:
+      enabled: true
+  data:
+    dialect: mssql`);
+    expect(yml.name).toBe("My App");
+    expect(yml.dialect).toBe("mssql");
+    expect(yml.authMethods).toEqual(["fabric", "password"]);
+  });
+
+  it("ignores a provider block that is not enabled", () => {
+    const yml = parseYml(`services:
+  auth:
+    fabric:
+      enabled: true
+    password:
+      enabled: false`);
+    expect(yml.authMethods).toEqual(["fabric"]);
+  });
+
+  it("falls back to a flat methods: list when no provider blocks are present", () => {
+    const yml = parseYml(`services:
+  auth:
+    methods:
+      - fabric
+      - password`);
+    expect(yml.authMethods).toEqual(["fabric", "password"]);
+  });
+});
+
+describe("hasRayfinAgentFiles", () => {
+  let dir: string;
+
+  afterEach(async () => {
+    if (dir) await rm(dir, { recursive: true, force: true });
+  });
+
+  it("is true when the CLI lockfile marker is present", async () => {
+    dir = await mkdtemp(path.join(os.tmpdir(), "np-rayfin-af-"));
+    const rf = path.join(dir, "rayfin");
+    await mkdir(rf, { recursive: true });
+    await writeFile(path.join(rf, ".lockfile.json"), JSON.stringify({ items: {}, version: 1 }));
+    expect(hasRayfinAgentFiles(dir, rf)).toBe(true);
+  });
+
+  it("falls back to AGENTS.md + .mcp.json when there is no lockfile", async () => {
+    dir = await mkdtemp(path.join(os.tmpdir(), "np-rayfin-af-"));
+    const rf = path.join(dir, "rayfin");
+    await mkdir(rf, { recursive: true });
+    await writeFile(path.join(dir, "AGENTS.md"), "# agents");
+    await writeFile(path.join(dir, ".mcp.json"), "{}");
+    expect(hasRayfinAgentFiles(dir, rf)).toBe(true);
+  });
+
+  it("is false when neither the lockfile nor both fallback files exist", async () => {
+    dir = await mkdtemp(path.join(os.tmpdir(), "np-rayfin-af-"));
+    const rf = path.join(dir, "rayfin");
+    await mkdir(rf, { recursive: true });
+    await writeFile(path.join(dir, "AGENTS.md"), "# agents"); // only one of the two
+    expect(hasRayfinAgentFiles(dir, rf)).toBe(false);
+  });
+});
+
+describe("readInstalledRayfinVersion", () => {
+  let dir: string;
+
+  afterEach(async () => {
+    if (dir) await rm(dir, { recursive: true, force: true });
+  });
+
+  async function writePkg(base: string, pkg: string, version: string): Promise<void> {
+    const pkgDir = path.join(base, "node_modules", ...pkg.split("/"));
+    await mkdir(pkgDir, { recursive: true });
+    await writeFile(path.join(pkgDir, "package.json"), JSON.stringify({ name: pkg, version }));
+  }
+
+  it("reads the CLI version from node_modules", async () => {
+    dir = await mkdtemp(path.join(os.tmpdir(), "np-rayfin-ver-"));
+    await writePkg(dir, "@microsoft/rayfin-cli", "1.33.2");
+    expect(readInstalledRayfinVersion(dir)).toBe("1.33.2");
+  });
+
+  it("falls back to the SDK core when the CLI is absent", async () => {
+    dir = await mkdtemp(path.join(os.tmpdir(), "np-rayfin-ver-"));
+    await writePkg(dir, "@microsoft/rayfin-core", "1.30.0");
+    expect(readInstalledRayfinVersion(dir)).toBe("1.30.0");
+  });
+
+  it("walks up to a hoisted monorepo install", async () => {
+    dir = await mkdtemp(path.join(os.tmpdir(), "np-rayfin-ver-"));
+    await writePkg(dir, "@microsoft/rayfin-cli", "1.33.2");
+    const nested = path.join(dir, "packages", "app");
+    await mkdir(nested, { recursive: true });
+    expect(readInstalledRayfinVersion(nested)).toBe("1.33.2");
+  });
+
+  it("returns null when no Rayfin package is installed", async () => {
+    dir = await mkdtemp(path.join(os.tmpdir(), "np-rayfin-ver-"));
+    expect(readInstalledRayfinVersion(dir)).toBeNull();
   });
 });
 

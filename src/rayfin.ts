@@ -5,6 +5,7 @@
 // Console like every other lane. This module owns the read-only model building,
 // a tolerant schema parser, and the CLI argv allow-list.
 import path from "node:path";
+import { readFileSync } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { readJson, readText, existsSyncSafe } from "./util.ts";
 import { exec } from "./pm.ts";
@@ -78,11 +79,7 @@ interface ParsedYml {
 export function parseYml(text: string): ParsedYml {
   const name = text.match(/^name:\s*(.+?)\s*$/m)?.[1] || null;
   const dialect = text.match(/\bdialect:\s*([\w-]+)/)?.[1] || null;
-  const authMethods: string[] = [];
-  const methodsBlock = text.match(/methods:\s*\n((?:[ \t]*-[ \t]*[\w-]+[ \t]*\n?)+)/);
-  if (methodsBlock) {
-    for (const m of methodsBlock[1].matchAll(/-[ \t]*([\w-]+)/g)) authMethods.push(m[1]);
-  }
+  const authMethods = parseAuthMethods(text);
   let staticHosting: RayfinConfig["staticHosting"] = null;
   const shStart = text.indexOf("staticHosting:");
   if (shStart >= 0) {
@@ -94,6 +91,24 @@ export function parseYml(text: string): ParsedYml {
     };
   }
   return { name, dialect, authMethods, staticHosting };
+}
+
+// Sign-in methods from rayfin.yml. The real schema enables providers as nested
+// blocks (`auth.fabric.enabled: true`, `auth.password.enabled: true`,
+// `auth.email.enabled: true`); older/hand-written configs use a flat
+// `auth.methods:` list. Support both — provider blocks first, list as fallback.
+function parseAuthMethods(text: string): string[] {
+  const methods: string[] = [];
+  for (const provider of ["fabric", "password", "email"]) {
+    const re = new RegExp(`\\b${provider}:\\s*\\n\\s*enabled:\\s*true\\b`);
+    if (re.test(text)) methods.push(provider);
+  }
+  if (methods.length) return methods;
+  const methodsBlock = text.match(/methods:\s*\n((?:[ \t]*-[ \t]*[\w-]+[ \t]*\n?)+)/);
+  if (methodsBlock) {
+    for (const m of methodsBlock[1].matchAll(/-[ \t]*([\w-]+)/g)) methods.push(m[1]);
+  }
+  return methods;
 }
 
 // ---- Schema parser (decorators → entities) --------------------------------
@@ -296,19 +311,42 @@ function permissionsFromDab(dab: unknown): Map<string, RayfinPermission[]> {
 
 // ---- .deployments.json ----------------------------------------------------
 
+// On-disk record shape written by the real rayfin CLI (`upsertDeployment` in
+// rayfin-tools): the fields are `fabric`-prefixed, with `fabricDeepLink` the
+// composed Fabric portal deep link and `hostingUrl` the public app URL. The
+// un-prefixed aliases (`itemId`/`apiUrl`/`workspaceId`/`tenantId`/`portalUrl`)
+// are kept as a fallback for hand-written fixtures and older registries.
 interface DeploymentRecord {
+  fabricItemId?: string;
+  fabricApiUrl?: string;
+  fabricWorkspaceId?: string;
+  fabricTenantId?: string;
+  fabricDeepLink?: string;
+  publishableKey?: string;
+  hostingUrl?: string;
+  deployedAt?: string;
+  // Legacy / fallback aliases.
   itemId?: string;
   apiUrl?: string;
   workspaceId?: string;
   tenantId?: string;
   portalUrl?: string;
-  hostingUrl?: string;
-  deployedAt?: string;
 }
 
-function fabricPortalUrl(rec: DeploymentRecord): string | null {
-  if (rec.portalUrl) return rec.portalUrl;
-  if (rec.workspaceId) return `https://app.fabric.microsoft.com/groups/${rec.workspaceId}`;
+// The "open Fabric workspace" link. The CLI stores a ready-made deep link to the
+// deployed item (`fabricDeepLink`); fall back to a legacy `portalUrl`, then to a
+// bare workspace URL composed from the workspace GUID.
+function fabricPortalUrl(rec: DeploymentRecord, workspaceId: string | null): string | null {
+  if (rec.fabricDeepLink?.trim()) return rec.fabricDeepLink;
+  if (rec.portalUrl?.trim()) return rec.portalUrl;
+  if (workspaceId) return `https://app.fabric.microsoft.com/groups/${workspaceId}`;
+  return null;
+}
+
+// Pick the first non-empty string, so an empty prefixed field (e.g.
+// `fabricApiUrl: ""`) doesn't shadow a populated legacy alias.
+function firstStr(...vals: (string | undefined | null)[]): string | null {
+  for (const v of vals) if (typeof v === "string" && v.trim() !== "") return v;
   return null;
 }
 
@@ -342,17 +380,23 @@ export async function readRayfinState(cwd: string): Promise<RayfinState> {
   const active = depsRaw?.active ?? null;
   const list: RayfinDeployment[] = Object.entries(depsRaw?.deployments || {})
     .filter(([, rec]) => isRecord(rec))
-    .map(([name, rec]) => ({
-      name,
-      active: name === active,
-      itemId: rec.itemId ?? null,
-      apiUrl: rec.apiUrl ?? null,
-      workspaceId: rec.workspaceId ?? null,
-      tenantId: rec.tenantId ?? null,
-      portalUrl: fabricPortalUrl(rec),
-      hostingUrl: rec.hostingUrl ?? null,
-      deployedAt: rec.deployedAt ?? null,
-    }));
+    .map(([name, rec]) => {
+      const itemId = firstStr(rec.fabricItemId, rec.itemId);
+      const apiUrl = firstStr(rec.fabricApiUrl, rec.apiUrl);
+      const workspaceId = firstStr(rec.fabricWorkspaceId, rec.workspaceId);
+      const tenantId = firstStr(rec.fabricTenantId, rec.tenantId);
+      return {
+        name,
+        active: name === active,
+        itemId,
+        apiUrl,
+        workspaceId,
+        tenantId,
+        portalUrl: fabricPortalUrl(rec, workspaceId),
+        hostingUrl: firstStr(rec.hostingUrl),
+        deployedAt: rec.deployedAt ?? null,
+      };
+    });
 
   // Data model: parse the schema, then enrich with DAB permissions when present.
   const schemaPath = existsSyncSafe(path.join(dir, "data", "schema.ts"))
@@ -393,9 +437,7 @@ export async function readRayfinState(cwd: string): Promise<RayfinState> {
   // the source of truth — credentials may live globally, not project-local).
   // `null` here is the "unknown" placeholder until that probe runs.
   const signedIn: boolean | null = null;
-  const hasAgentFiles =
-    existsSyncSafe(path.join(cwd, "AGENTS.md")) ||
-    existsSyncSafe(path.join(cwd, "mcp-server.json"));
+  const hasAgentFiles = hasRayfinAgentFiles(cwd, dir);
 
   return {
     detected: true,
@@ -405,6 +447,15 @@ export async function readRayfinState(cwd: string): Promise<RayfinState> {
     entities,
     functions,
     connectors,
+    cli: {
+      // Installed version is a cheap sync read; the controller overlays the
+      // (network) latest/update-available fields from its throttled check.
+      installed: readInstalledRayfinVersion(cwd),
+      latest: null,
+      updateAvailable: false,
+      checkedAt: null,
+      error: false,
+    },
     hasDabConfig,
     hasAgentFiles,
     paths: {
@@ -416,6 +467,43 @@ export async function readRayfinState(cwd: string): Promise<RayfinState> {
     links: RAYFIN_LINKS,
     at: Date.now(),
   };
+}
+
+// Whether the Rayfin-managed agent files are installed. The CLI records its
+// managed items in `rayfin/.lockfile.json` (`rayfin init ai-files install`), so
+// that lockfile is the authoritative marker; fall back to the presence of both
+// an `AGENTS.md` and a `.mcp.json` for projects predating the lockfile.
+export function hasRayfinAgentFiles(cwd: string, rayfinDir: string): boolean {
+  if (existsSyncSafe(path.join(rayfinDir, ".lockfile.json"))) return true;
+  return existsSyncSafe(path.join(cwd, "AGENTS.md")) && existsSyncSafe(path.join(cwd, ".mcp.json"));
+}
+
+// Read the Rayfin version installed in the project (the CLI and SDK are
+// version-locked, so either answers "what Rayfin am I on"). Prefers the CLI
+// package, falls back to the SDK core. Walks up so hoisted monorepo installs are
+// found. Returns null when neither is installed.
+export function readInstalledRayfinVersion(cwd: string): string | null {
+  const pkgs = ["@microsoft/rayfin-cli", "@microsoft/rayfin-core"];
+  let dir = path.resolve(cwd);
+  for (let i = 0; i < 8; i++) {
+    for (const p of pkgs) {
+      const v = readPkgVersion(path.join(dir, "node_modules", p, "package.json"));
+      if (v) return v;
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return null;
+}
+
+function readPkgVersion(file: string): string | null {
+  try {
+    const v = (JSON.parse(readFileSync(file, "utf8")) as { version?: unknown }).version;
+    return typeof v === "string" ? v : null;
+  } catch {
+    return null;
+  }
 }
 
 async function listDirs(dir: string): Promise<string[]> {
@@ -441,16 +529,12 @@ async function listDirs(dir: string): Promise<string[]> {
 const ALLOWED_COMMANDS: ReadonlySet<string> = new Set([
   "login",
   "logout",
-  "dev start",
-  "dev stop",
-  "dev status",
-  "dev db apply",
   "up",
   "up status",
   "up db apply",
   "functions typegen",
   "connector list",
-  "ai-files",
+  "init ai-files install",
 ]);
 
 const SAFE_ARG = /^[A-Za-z0-9@._/:+-]+$/;
