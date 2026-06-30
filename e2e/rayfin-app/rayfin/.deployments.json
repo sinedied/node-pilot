@@ -1,5 +1,5 @@
 {
-  "active": "prod",
+  "active": "staging",
   "deployments": {
     "prod": {
       "fabricItemId": "b1d2c3e4-0000-4a1a-9c2b-1111aaaa2222",
