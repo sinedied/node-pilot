@@ -84,7 +84,9 @@ inspiration: [coffilot](https://github.com/jdubois/coffilot). Full design in
 - `e2e/` — **permanent dogfood fixtures**, its own npm **workspace root**
   (`package.json` with `workspaces:["*"]`, name `cockpit-e2e`) kept **out** of
   Cockpit's own install/lockfile so fixture deps never pollute Cockpit's
-  Dependencies/Audit tab. **Two Rayfin fixtures** (see the Rayfin gotcha for the split):
+  Dependencies/Audit tab. The e2e workspace keeps its **own committed
+  `e2e/package-lock.json`** (independent of the root lockfile — don't delete it as a
+  stray artifact); `e2e/**/node_modules` stays gitignored. **Two Rayfin fixtures** (see the Rayfin gotcha for the split):
   `e2e/rayfin-app/` (`rayfin-mock-app`) is the **offline mock** — committed real-schema
   `rayfin/` files (`fabric*` `.deployments.json` + nested-provider `rayfin.yml` + `.env` /
   `dab-config.json` / `data/schema.ts` / `functions/`) so the **Rayfin tab renders fully
