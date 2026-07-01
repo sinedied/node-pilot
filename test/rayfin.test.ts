@@ -477,6 +477,75 @@ services:
   });
 });
 
+describe("parseYml service flags", () => {
+  const full = `id: demo
+name: Demo App
+version: 2.4.1
+services:
+  auth:
+    enabled: true
+    fabric:
+      enabled: true
+  data:
+    enabled: true
+    dialect: mssql
+  staticHosting:
+    enabled: true
+    folder: dist
+    buildCommand: npm run build:fabric
+    indexDocument: index.html
+  storage:
+    enabled: true
+  functions:
+    enabled: false`;
+
+  it("reads the top-level app version", () => {
+    expect(parseYml(full).version).toBe("2.4.1");
+  });
+
+  it("reads each service's immediate enabled flag (not a nested provider's)", () => {
+    const yml = parseYml(full);
+    expect(yml.storageEnabled).toBe(true);
+    expect(yml.functionsEnabled).toBe(false);
+  });
+
+  it("reads staticHosting folder + build command", () => {
+    const sh = parseYml(full).staticHosting;
+    expect(sh?.folder).toBe("dist");
+    expect(sh?.buildCommand).toBe("npm run build:fabric");
+    expect(sh?.indexDocument).toBe("index.html");
+  });
+
+  it("distinguishes an absent service (null) from an explicit enabled: false", () => {
+    const yml = parseYml(`name: No Extras
+services:
+  data:
+    enabled: true
+    dialect: postgresql`);
+    expect(yml.storageEnabled).toBeNull();
+    expect(yml.functionsEnabled).toBeNull();
+    expect(yml.version).toBeNull();
+    expect(yml.dialect).toBe("postgresql");
+  });
+
+  it("reads only the service's own enabled flag, never a nested child's", () => {
+    // `functions:` has no direct `enabled:`, only a nested provider that does —
+    // service enablement must stay null (unknown), not inherit the child value.
+    const yml = parseYml(`services:
+  functions:
+    runtime:
+      enabled: true`);
+    expect(yml.functionsEnabled).toBeNull();
+  });
+
+  it("tolerates a trailing comment on the service key line", () => {
+    const yml = parseYml(`services:
+  storage: # experimental
+    enabled: true`);
+    expect(yml.storageEnabled).toBe(true);
+  });
+});
+
 describe("hasRayfinAgentFiles", () => {
   let dir: string;
 

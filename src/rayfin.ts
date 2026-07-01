@@ -69,8 +69,11 @@ export async function detectRayfin(
 
 interface ParsedYml {
   name: string | null;
+  version: string | null;
   dialect: string | null;
   authMethods: string[];
+  storageEnabled: boolean | null;
+  functionsEnabled: boolean | null;
   staticHosting: RayfinConfig["staticHosting"];
 }
 
@@ -78,8 +81,11 @@ interface ParsedYml {
 // not a general YAML parser.
 export function parseYml(text: string): ParsedYml {
   const name = text.match(/^name:\s*(.+?)\s*$/m)?.[1] || null;
+  const version = text.match(/^version:\s*(.+?)\s*$/m)?.[1] || null;
   const dialect = text.match(/\bdialect:\s*([\w-]+)/)?.[1] || null;
   const authMethods = parseAuthMethods(text);
+  const storageEnabled = serviceEnabled(text, "storage");
+  const functionsEnabled = serviceEnabled(text, "functions");
   let staticHosting: RayfinConfig["staticHosting"] = null;
   const shStart = text.indexOf("staticHosting:");
   if (shStart >= 0) {
@@ -90,7 +96,56 @@ export function parseYml(text: string): ParsedYml {
       buildCommand: block.match(/buildCommand:\s*(.+?)\s*$/m)?.[1] || null,
     };
   }
-  return { name, dialect, authMethods, staticHosting };
+  return { name, version, dialect, authMethods, storageEnabled, functionsEnabled, staticHosting };
+}
+
+// Locate a `services.<name>:` block and return its lines (those indented deeper
+// than the service key) plus the service key's own indent, so per-service fields
+// can be read without a full YAML parser. Scoped to the `services:` mapping so a
+// same-named key elsewhere can't match; tolerates a trailing `# comment` on the
+// service line. `service` is always a fixed internal identifier, but escape it
+// anyway so it's never interpreted as a regex.
+function serviceBlock(text: string, service: string): { indent: number; lines: string[] } | null {
+  const all = text.split(/\r?\n/);
+  // Only search within the `services:` mapping when present.
+  const servicesIdx = all.findIndex((l) => /^\s*services:\s*(?:#.*)?$/.test(l));
+  const start = servicesIdx >= 0 ? servicesIdx + 1 : 0;
+  const name = service.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const head = new RegExp(`^(\\s*)${name}:\\s*(?:#.*)?$`);
+  for (let i = start; i < all.length; i++) {
+    const m = all[i].match(head);
+    if (!m) continue;
+    const indent = m[1].length;
+    const lines: string[] = [];
+    for (let j = i + 1; j < all.length; j++) {
+      const line = all[j];
+      if (line.trim() === "") continue;
+      const li = line.match(/^(\s*)/)?.[1].length ?? 0;
+      if (li <= indent) break;
+      lines.push(line);
+    }
+    return { indent, lines };
+  }
+  return null;
+}
+
+// The service's OWN immediate `enabled:` flag (a direct child of the service
+// key), never a nested provider's (e.g. `auth.fabric.enabled`). Returns null
+// when the service — or its own flag — is absent, so "not configured" stays
+// distinct from an explicit `enabled: false`.
+function serviceEnabled(text: string, service: string): boolean | null {
+  const block = serviceBlock(text, service);
+  if (!block || !block.lines.length) return null;
+  // Direct children share the shallowest indentation within the block; deeper
+  // lines belong to nested mappings and must be ignored.
+  const childIndent = Math.min(...block.lines.map((l) => l.match(/^(\s*)/)?.[1].length ?? 0));
+  for (const line of block.lines) {
+    const li = line.match(/^(\s*)/)?.[1].length ?? 0;
+    if (li !== childIndent) continue;
+    const m = line.match(/^\s*enabled:\s*(true|false)\b/);
+    if (m) return m[1] === "true";
+  }
+  return null;
 }
 
 // Sign-in methods from rayfin.yml. The real schema enables providers as nested
@@ -404,8 +459,11 @@ export async function readRayfinState(cwd: string): Promise<RayfinState> {
   const config: RayfinConfig | null = yml
     ? {
         name: yml.name,
+        version: yml.version,
         dialect: yml.dialect,
         authMethods: yml.authMethods,
+        storageEnabled: yml.storageEnabled,
+        functionsEnabled: yml.functionsEnabled,
         staticHosting: yml.staticHosting,
       }
     : null;

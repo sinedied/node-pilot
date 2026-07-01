@@ -1414,7 +1414,6 @@ function renderRayfin() {
   const r = state.rayfin;
   if (!r || r.detected === false) {
     $("#rf-app-name").textContent = "Rayfin";
-    $("#rf-dialect").classList.add("hidden");
     for (const id of ["#rf-env", "#rf-workspace", "#rf-functions", "#rf-docs"]) {
       const el = $(id);
       if (el) el.innerHTML = '<div class="rf-empty">Loading…</div>';
@@ -1430,26 +1429,37 @@ function renderRayfin() {
     return;
   }
 
-  // Header
+  // Header (app name, installed version, sign-in status + action)
   $("#rf-app-name").textContent = r.config?.name || "Rayfin";
-  const dialect = $("#rf-dialect");
-  if (r.config?.dialect) {
-    dialect.textContent = r.config.dialect;
-    dialect.classList.remove("hidden");
-  } else dialect.classList.add("hidden");
   renderRayfinVersion(r.cli);
-
-  // Environment
   const auth = $("#rf-auth-chip");
   const signedIn = r.auth?.signedIn;
   auth.textContent =
     signedIn === true ? "Signed in" : signedIn === false ? "Signed out" : "Unknown";
   auth.className = `rf-chip ${signedIn === true ? "ok" : "muted"}`;
-  $("#rf-backend-chip").classList.add("hidden");
-  const methods = (r.config?.authMethods || []).join(", ") || "—";
-  const hosting = r.config?.staticHosting?.folder;
-  $("#rf-env").innerHTML = `<div class="rf-kv"><span>Auth methods</span><b>${esc(methods)}</b></div>
-    ${hosting ? `<div class="rf-kv"><span>Static hosting</span><b>${esc(hosting)}</b></div>` : ""}`;
+
+  // Configuration: deployed auth method + database + app version + hosting +
+  // storage, read from rayfin.yml. The Rayfin tab targets Fabric deploys, whose
+  // only sign-in method is Fabric SSO (Entra ID) — password/email apply to the
+  // not-yet-supported local backend, so we don't surface them here.
+  const cfg = r.config || {};
+  const rows = [];
+  const authLabel = (cfg.authMethods || []).includes("fabric") ? "Fabric SSO" : "—";
+  rows.push(`<div class="rf-kv"><span>Auth</span><b>${esc(authLabel)}</b></div>`);
+  if (cfg.dialect)
+    rows.push(`<div class="rf-kv"><span>Database</span><b>${esc(cfg.dialect)}</b></div>`);
+  if (cfg.version)
+    rows.push(`<div class="rf-kv"><span>App version</span><b>${esc(cfg.version)}</b></div>`);
+  const sh = cfg.staticHosting;
+  if (sh?.folder) {
+    const hosting = sh.buildCommand ? `${sh.folder} (${sh.buildCommand})` : sh.folder;
+    rows.push(`<div class="rf-kv"><span>Static hosting</span><b>${esc(hosting)}</b></div>`);
+  }
+  if (cfg.storageEnabled != null)
+    rows.push(
+      `<div class="rf-kv"><span>Storage</span><b>${cfg.storageEnabled ? "Enabled" : "Disabled"}</b></div>`,
+    );
+  $("#rf-env").innerHTML = rows.join("\n");
 
   // Fabric workspace & deployment
   const list = r.deployments?.list || [];
@@ -1488,18 +1498,26 @@ function renderRayfin() {
   } else count.classList.add("hidden");
   renderRayfinModel();
 
-  // Functions & connectors
+  // Functions & connectors — gated on support. Functions/connectors aren't
+  // backed by the current (stable or experimental) Rayfin CLI yet, so only show
+  // the section when the project actually declares/ships them: `functions`
+  // enabled in rayfin.yml, or a real functions/connectors directory present.
   const fns = r.functions || [];
   const conns = r.connectors || [];
-  const fnHtml = fns.length
-    ? fns.map((f) => `<span class="rf-tag">${esc(f)}</span>`).join("")
-    : '<span class="rf-muted">No functions</span>';
-  const connHtml = conns.length
-    ? conns.map((c) => `<span class="rf-tag">${esc(c)}</span>`).join("")
-    : '<span class="rf-muted">No connectors</span>';
-  $("#rf-functions").innerHTML =
-    `<div class="rf-kv"><span>Functions</span><div class="rf-tags">${fnHtml}</div></div>
+  const functionsSupported =
+    r.config?.functionsEnabled === true || fns.length > 0 || conns.length > 0;
+  $("#rf-functions-section")?.classList.toggle("hidden", !functionsSupported);
+  if (functionsSupported) {
+    const fnHtml = fns.length
+      ? fns.map((f) => `<span class="rf-tag">${esc(f)}</span>`).join("")
+      : '<span class="rf-muted">No functions</span>';
+    const connHtml = conns.length
+      ? conns.map((c) => `<span class="rf-tag">${esc(c)}</span>`).join("")
+      : '<span class="rf-muted">No connectors</span>';
+    $("#rf-functions").innerHTML =
+      `<div class="rf-kv"><span>Functions</span><div class="rf-tags">${fnHtml}</div></div>
     <div class="rf-kv"><span>Connectors</span><div class="rf-tags">${connHtml}</div></div>`;
+  }
 
   // Docs & agent setup
   const agentMsg = r.hasAgentFiles
@@ -3652,9 +3670,9 @@ $("#tab-rayfin").addEventListener("click", async (e) => {
   if (r && r.started === false && r.reason) toast(r.reason);
 });
 
-// "Start env": launches the project's dev server (the Preview tab's Dev lane) and
-// switches to Preview — same as clicking Start there. Named "env" rather than
-// "local" because for a Rayfin app the dev server talks to the remote backend.
+// "Start dev server": launches the project's dev server (the Preview tab's Dev
+// lane) and switches to Preview — same as clicking Start there. For a Rayfin app
+// the dev server talks to the remote backend, so it's a "dev server", not "local".
 $("#rf-start-env")?.addEventListener("click", () => {
   api("/api/dev/start", {});
   showTab("preview");

@@ -572,10 +572,13 @@
             <svg class="oi" aria-hidden="true"><use href="#oct-rayfin" /></svg>
             <span id="rf-app-name">Rayfin</span>
           </h2>
-          <span id="rf-dialect" class="rf-chip muted hidden"></span>
           <span id="rf-version" class="rf-chip muted hidden" title="Installed Rayfin version"></span>
           <span id="rf-update-badge" class="info-meta-badge hidden">Update available</span>
           <span class="grow"></span>
+          <span id="rf-auth-chip" class="rf-chip" title="Rayfin sign-in status"></span>
+          <button type="button" class="lane-btn" data-rf-cli="login">
+            <svg class="oi" aria-hidden="true"><use href="#oct-sign-in" /></svg>Sign in
+          </button>
           <button type="button"
             id="rf-update"
             class="copilot-btn hidden"
@@ -593,21 +596,16 @@
           </button>
         </div>
 
-        <!-- Environment / status -->
+        <!-- Configuration -->
         <div class="deps-section">
           <div class="deps-section-head wrap">
             <h3 class="deps-section-title">
-              <svg class="oi" aria-hidden="true"><use href="#oct-shield-check" /></svg>Environment
+              <svg class="oi" aria-hidden="true"><use href="#oct-gear" /></svg>Configuration
             </h3>
-            <span id="rf-auth-chip" class="rf-chip"></span>
-            <span id="rf-backend-chip" class="rf-chip"></span>
             <span class="grow"></span>
-            <button type="button" class="lane-btn" data-rf-cli="login">
-              <svg class="oi" aria-hidden="true"><use href="#oct-sign-in" /></svg>Sign in
-            </button>
             <button type="button" class="lane-btn" id="rf-start-env"
-              title="Start the dev environment (Preview tab)">
-              <svg class="oi" aria-hidden="true"><use href="#oct-play" /></svg>Start env
+              title="Start the dev server (Preview tab)">
+              <svg class="oi" aria-hidden="true"><use href="#oct-play" /></svg>Start dev server
             </button>
           </div>
           <div id="rf-env" class="rf-env"></div>
@@ -686,7 +684,7 @@
         </div>
 
         <!-- Functions / connectors -->
-        <div class="deps-section">
+        <div class="deps-section" id="rf-functions-section">
           <div class="deps-section-head wrap">
             <h3 class="deps-section-title">
               <svg class="oi" aria-hidden="true"><use href="#oct-zap" /></svg>Functions &amp; connectors

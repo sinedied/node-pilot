@@ -145,8 +145,11 @@ export interface RayfinEntity {
 
 export interface RayfinConfig {
   name: string | null;
+  version: string | null;
   dialect: string | null;
   authMethods: string[];
+  storageEnabled: boolean | null;
+  functionsEnabled: boolean | null;
   staticHosting: {
     folder: string | null;
     indexDocument: string | null;

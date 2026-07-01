@@ -1,5 +1,11 @@
 # Rayfin project configuration (real schema, as written by the Rayfin CLI).
 # Docs: https://aka.ms/rayfin/docs
+#
+# NOTE: this offline mock deliberately enables the forward-looking `functions`
+# and `storage` services (which no Rayfin CLI scaffolds yet) so Cockpit.js's
+# gated "Functions & connectors" section renders offline. Real stable deploys
+# (see the sibling rayfin-todo-app fixture) omit them, so that section stays
+# hidden there — the two fixtures exercise both sides of the gate.
 id: rayfin-mock-app
 name: Rayfin Mock App
 version: 1.0.0
@@ -22,3 +28,7 @@ services:
     folder: dist
     buildCommand: npm run build
     indexDocument: index.html
+  storage:
+    enabled: true
+  functions:
+    enabled: true
