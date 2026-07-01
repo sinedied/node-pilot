@@ -51,16 +51,32 @@ Instead of pills, extract proper information about the project. Suggest useful i
   * deploy button css issue on hover (all others blue buttons have this issue)
 - [x] security fix with copilot: first try with audit fix (if using NPM), then if that fails, try to use copilot to fix the security issues. 
   * also layout issue, see screenshot
-
-- [ ] rayfin real world app test
+- [x] angular
+- [x] xo linter
+- [x] monorepo: turbo, rush
+- [x] Readme cleanup
+  * development details go to docs/development.md
+  * remove how it works
+  * remove roadmap section
+  * remove license section (not needed already surfaced by Github)
+  * Features section is too long, could you try keeping it leaner, and maybe rationalize to most important features?
+- [x] rayfin real world app test
 
 - [ ] update mechanism doesn't seem to work: investigate why, probably the GitHub release actions isn't working properly
 
-- [ ] Rayfin tab: local dev not fully implemented yet, its local dev with remote backend. Hide the local options for now (don't remove them, as they will be needed later)
+- [x] Rayfin tab: local dev not fully implemented yet, its local dev with remote backend. Hide the local options for now (don't remove them, as they will be needed later)
+  * rayfin dev commands don't exists (yet), same for "apply to local"
+  * starting local server is same as starting local dev server (usually npm run dev in the templates) => should use tool from preview tab and switch to it
+  * on a Fabric deployed rayfin app, only Open App link appears, no Open Fabric workspace or API endpoint link.
+  * There's no way to add a new Fabric workspace if I want to switch between multiple workspaces. Once I deployed the app, I should be able to add a new workspace and switch between them.
+  * dogfooding on a fake app doesn't work. I need rayfin-todo-app to be a REAL rayfin app that I can test deploy etc.
+  * Set up agents files button should call the related rayfin CLI command (if it's not already the case) and the button should only be present if the agent files are not installed.
+  * First rayfin header should show the currently installed version of Rayfin in the project. If there's a newer version available, it should show a notification and a button to update to the latest version using Copilot.
 
+- [ ] playwright tab?
 
-
-
+- [ ] update: no notification at start start when update is available?
+  * update: do ALL the work you can without copilot, it should be necessary to burn tokens just for an update.
 
 
 - [ ] skill readme/prep release
