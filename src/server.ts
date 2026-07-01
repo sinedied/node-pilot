@@ -188,7 +188,7 @@ async function handleApi(
     case "POST /api/update/check":
       return sendJson(res, 200, await controller.getUpdateInfo(body.force === true));
     case "POST /api/update/apply": {
-      const result = await controller.sendCopilotSelfUpdate();
+      const result = await controller.applySelfUpdate();
       return sendJson(res, result.ok ? 200 : 400, result);
     }
     case "POST /api/fix":

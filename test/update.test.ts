@@ -7,7 +7,6 @@ import {
   deriveSlug,
   fetchLatestRelease,
   checkForUpdate,
-  buildSelfUpdatePrompt,
 } from "../src/update.ts";
 
 // Minimal Response stand-in for the injected fetch.
@@ -145,6 +144,7 @@ describe("checkForUpdate", () => {
     });
     expect(info.updateAvailable).toBe(true);
     expect(info.latestVersion).toBe("1.1.0");
+    expect(info.latestTag).toBe("v1.1.0");
     expect(info.releaseUrl).toContain("/releases/tag/v1.1.0");
     expect(info.error).toBe(false);
   });
@@ -172,33 +172,6 @@ describe("checkForUpdate", () => {
     expect(info.error).toBe(true);
     expect(info.updateAvailable).toBe(false);
     expect(info.latestVersion).toBeNull();
-  });
-});
-
-describe("buildSelfUpdatePrompt", () => {
-  it("includes versions, install dir, repo and release notes", () => {
-    const prompt = buildSelfUpdatePrompt({
-      installDir: "/tmp/cockpit",
-      currentVersion: "1.0.0",
-      latestVersion: "1.1.0",
-      repoSlug: "sinedied/cockpit-js",
-      releaseUrl: "https://github.com/sinedied/cockpit-js/releases/tag/v1.1.0",
-    });
-    expect(prompt).toContain("v1.0.0 → v1.1.0");
-    expect(prompt).toContain("/tmp/cockpit");
-    expect(prompt).toContain("sinedied/cockpit-js");
-    expect(prompt).toContain("extensions_reload");
-    expect(prompt).toContain("Release notes:");
-  });
-
-  it("omits the release-notes line when there is no url", () => {
-    const prompt = buildSelfUpdatePrompt({
-      installDir: "/tmp/cockpit",
-      currentVersion: "1.0.0",
-      latestVersion: "1.1.0",
-      repoSlug: "sinedied/cockpit-js",
-      releaseUrl: null,
-    });
-    expect(prompt).not.toContain("Release notes:");
+    expect(info.latestTag).toBeNull();
   });
 });

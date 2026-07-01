@@ -902,7 +902,7 @@
           </div>
           <div class="settings-section">
             <h3 class="settings-title">About Cockpit.js</h3>
-            <p class="settings-hint">Cockpit checks GitHub for new releases and lets Copilot update it for you.</p>
+            <p class="settings-hint">Cockpit checks GitHub for new releases and updates itself in place — Copilot only reloads the panel at the end.</p>
             <div class="about-card">
               <div class="about-row">
                 <span class="about-version">
@@ -936,6 +936,18 @@
     </main>
 
     <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+
+    <!-- Bottom popup shown once per release when an update is first discovered. -->
+    <div id="update-notice" class="update-notice hidden" role="dialog" aria-label="Update available" data-global>
+      <svg class="oi update-notice-icon" aria-hidden="true"><use href="#oct-download" /></svg>
+      <span id="update-notice-text" class="update-notice-text">A new version of Cockpit.js is available.</span>
+      <div class="update-notice-actions">
+        <button type="button" id="update-notice-dismiss" class="lane-btn task" data-global>Dismiss</button>
+        <button type="button" id="update-notice-update" class="copilot-btn" data-global>
+          <svg class="oi" aria-hidden="true"><use href="#oct-download" /></svg>Update
+        </button>
+      </div>
+    </div>
 
     <script type="module" src="/__cockpit/app.js"></script>
   </body>

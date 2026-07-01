@@ -535,6 +535,9 @@ export interface Settings {
   autoDeps: boolean;
   // Check GitHub Releases for a newer Cockpit.js version when the extension loads.
   checkUpdatesOnLaunch: boolean;
+  // The latest version the user has dismissed in the update popup, so we don't
+  // re-prompt for the same release. Null = nothing dismissed yet.
+  dismissedUpdateVersion?: string | null;
   // Monorepo focus: absolute dir of the last project the user selected for this
   // session root. Stored under the root's settings entry, read back on re-open.
   activeProject?: string | null;
@@ -552,6 +555,7 @@ export interface ResolvedSettings {
   autoTest: boolean;
   autoDeps: boolean;
   checkUpdatesOnLaunch: boolean;
+  dismissedUpdateVersion: string | null;
 }
 
 export interface SettingsPatch {
@@ -563,6 +567,7 @@ export interface SettingsPatch {
   autoTest?: boolean;
   autoDeps?: boolean;
   checkUpdatesOnLaunch?: boolean;
+  dismissedUpdateVersion?: string | null;
   activeProject?: string | null;
 }
 

@@ -42,6 +42,7 @@ const DEFAULTS: Settings = {
   autoTest: true,
   autoDeps: true,
   checkUpdatesOnLaunch: true,
+  dismissedUpdateVersion: null,
 };
 
 const LANE_IDS = new Set<LaneId>(["build", "typecheck", "lint", "format", "test", "e2e"]);
@@ -95,6 +96,8 @@ export function migrate(raw: Partial<Settings> | undefined): Settings {
     autoTest: raw?.autoTest !== false,
     autoDeps: raw?.autoDeps !== false,
     checkUpdatesOnLaunch: raw?.checkUpdatesOnLaunch !== false,
+    dismissedUpdateVersion:
+      typeof raw?.dismissedUpdateVersion === "string" ? raw.dismissedUpdateVersion : null,
     activeProject: typeof raw?.activeProject === "string" ? raw.activeProject : null,
   };
   if (raw && "pinnedTasks" in raw) {
@@ -157,6 +160,8 @@ async function doSaveSettings(projectKey: string, patch: SettingsPatch): Promise
   if (typeof patch.autoDeps === "boolean") next.autoDeps = patch.autoDeps;
   if (typeof patch.checkUpdatesOnLaunch === "boolean")
     next.checkUpdatesOnLaunch = patch.checkUpdatesOnLaunch;
+  if (typeof patch.dismissedUpdateVersion === "string" || patch.dismissedUpdateVersion === null)
+    next.dismissedUpdateVersion = patch.dismissedUpdateVersion;
   if (typeof patch.activeProject === "string" || patch.activeProject === null)
     next.activeProject = patch.activeProject;
   // Persist the new schema only; drop the legacy `pinnedScripts`/`autoLint` keys.
@@ -169,6 +174,7 @@ async function doSaveSettings(projectKey: string, patch: SettingsPatch): Promise
     autoTest: next.autoTest,
     autoDeps: next.autoDeps,
     checkUpdatesOnLaunch: next.checkUpdatesOnLaunch,
+    dismissedUpdateVersion: next.dismissedUpdateVersion,
     activeProject: next.activeProject,
   };
   await writeAll(all);

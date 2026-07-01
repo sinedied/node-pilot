@@ -595,22 +595,52 @@ update-check reads exactly the Releases the pipeline produces — so keep them i
 - **Source of truth = GitHub Releases.** `src/update.ts` (pure, SDK-free, unit-tested) does
   semver compare + `GET /repos/<slug>/releases/latest`. Any failure (offline / rate-limited
   / 404 no-releases / 5s timeout) returns `error: true` and **never** a false
-  "update available" — the UI shows a quiet "Couldn't check for updates".
-- **Mechanism = Copilot-assisted.** The extension can't reload itself; only the host/agent
-  can `extensions_reload`. So "Update Cockpit.js" hands a crafted prompt (install dir,
-  current→latest, release URL) to chat via `sendToChat` (`buildSelfUpdatePrompt`), mirroring
-  `sendCopilotUpdate`. Never auto-apply — only on an explicit click.
+  "update available" — the UI shows a quiet "Couldn't check for updates". `UpdateInfo` also
+  carries `latestTag` (the `v1.2.3` tag) so the in-process updater can fetch the right
+  tarball.
+- **Mechanism = in-process file swap, Copilot only reloads.** The extension applies the
+  update **itself** — no token burn. `src/self-update.ts` (SDK-free, unit-tested; injectable
+  `fetchImpl` + `run`): `applyRelease()` downloads the release **tarball**
+  (`api.github.com/repos/<slug>/tarball/<tag>`, Node `fetch` follows the 302 → codeload;
+  send **only** a `User-Agent` header — adding `Accept: application/x-gzip` makes GitHub
+  return **415**), extracts it with the `tar` CLI (`-xzf … --strip-components=1`, spawned via
+  `process-runner.run`) into a **staging dir in the install's parent** (same filesystem),
+  validates the extracted `package.json` version === target, then **atomically swaps**
+  (`rename` install → `.bak`, `rename` staging → install, restore on failure, then `rm` the
+  backup). **No `npm install`** — the extension has zero runtime deps, so an update is a pure
+  file swap; the whole-dir swap also prunes removed files. The **only** Copilot step is the
+  final reload: after a successful swap the controller `sendToChat`s a tiny
+  `buildReloadPrompt(version)` ("reload with `extensions_reload`") because the extension
+  can't reload itself. Never auto-apply — only on an explicit click.
+- **Git-checkout guard.** `applyRelease` refuses when the install dir is a git working tree
+  (`isGitCheckout` = a `.git` entry exists) — it would clobber the maintainer's uncommitted
+  work. Real user installs are **plain folder copies** (e.g. `~/.copilot/extensions/cockpit`,
+  the user-scope install) with no `.git`, so the swap targets them; **dogfood the real
+  download/swap on that copy, not the dev repo** (the running `project:cockpit` dogfood
+  wrapper resolves `EXTENSION_DIR` to the git repo root → refused).
 - **Controller:** `version`/`repoSlug` come in via `ControllerOptions` (read once from
   `package.json` by `extension.ts` → `readPackageMetaSync()`), are exposed in `getState()`,
   and drive `getUpdateInfo(force)` (in-memory cache, ~6h throttle; `force` bypasses) +
-  `sendCopilotSelfUpdate()`. Network checks are non-fatal and keep the last good result.
+  `applySelfUpdate()` (single-flight via `_selfUpdating`; **force-rechecks** latest so it
+  never installs a stale cached tag → `applyRelease` → reload prompt). Network checks are
+  non-fatal and keep the last good result.
 - **Routes:** `POST /api/update/check {force}` → `getUpdateInfo`; `POST /api/update/apply` →
-  `sendCopilotSelfUpdate`.
-- **Setting:** `checkUpdatesOnLaunch` (default true) — same per-project storage as
-  `theme`/`auto*` even though it's semantically global; the on-load check honors it.
+  `applySelfUpdate` (returns `{ ok, installedVersion?, reason? }`).
+- **Settings:** `checkUpdatesOnLaunch` (default true) gates the on-load check;
+  `dismissedUpdateVersion` (string|null) records the version the user dismissed in the popup
+  so it won't reappear until a newer release ships. Same per-project storage as `theme`/
+  `auto*` even though both are semantically global — so in a monorepo a dismissal applies to
+  the active project only (accepted, mirrors `checkUpdatesOnLaunch`).
 - **UI:** Settings → "About Cockpit.js" card (version line, status, "Check for updates"
   `.lane-btn`, "What's new" external link, gradient "Update Cockpit.js" `.copilot-btn`) plus
-  an accent **update dot** on the gear (`#settings-update-dot`) when an update is available.
+  an accent **update dot** on the gear (`#settings-update-dot`). On top of the dot, a
+  **first-discovery popup** (`#update-notice`, a persistent bottom dialog mirroring `.toast`
+  but with actions) shows when `updateAvailable && !error && latestVersion !==
+  settings.dismissedUpdateVersion`: **Update** (`.copilot-btn`, runs the same
+  `/api/update/apply` flow via `applyUpdate()`) + **Dismiss** (persists
+  `dismissedUpdateVersion`, hides; gear dot stays). `renderUpdateNotice()` is driven from
+  `renderAbout()` + `applySettings()`. The Update button keeps the gradient look because the
+  flow still ends in a Copilot reload.
   The self-update controls are **extension-scoped, not project-scoped** → marked
   `[data-global]` and excluded from `setControlsEnabled` (the `.lane-btn:not([data-global]),
   .copilot-btn:not([data-global])` selector) so they stay usable with no project open.

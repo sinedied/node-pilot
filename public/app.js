@@ -41,6 +41,7 @@ const state = {
     autoTest: false,
     autoDeps: false,
     checkUpdatesOnLaunch: true,
+    dismissedUpdateVersion: null,
   },
   version: null,
   update: null,
@@ -2875,11 +2876,14 @@ function applySettings(s) {
     autoTest: !!s.autoTest,
     autoDeps: !!s.autoDeps,
     checkUpdatesOnLaunch: s.checkUpdatesOnLaunch !== false,
+    dismissedUpdateVersion:
+      typeof s.dismissedUpdateVersion === "string" ? s.dismissedUpdateVersion : null,
   };
   applyTheme(state.settings.theme);
   renderPinned();
   applyTabLayout();
   renderSettingsPanel();
+  renderUpdateNotice();
 }
 
 async function persistSettings(patch) {
@@ -3879,6 +3883,63 @@ function renderAbout() {
   }
   if (apply) apply.classList.toggle("hidden", !available);
   if (dot) dot.classList.toggle("hidden", !available);
+  renderUpdateNotice();
+}
+
+// The bottom popup, shown once per release: visible when an update is available
+// and the user hasn't dismissed that exact version. Dismiss persists the version
+// so it won't reappear until a newer one ships; the gear dot stays as the quiet
+// passive indicator.
+let updateApplying = false;
+let selfUpdateApplied = false;
+function renderUpdateNotice() {
+  const el = $("#update-notice");
+  if (!el) return;
+  // Once an update has been applied, keep the popup hidden through the brief
+  // window before Copilot reloads the panel (state.update still reads "available"
+  // because the running version only changes on reload).
+  if (selfUpdateApplied) {
+    el.classList.add("hidden");
+    return;
+  }
+  const u = state.update;
+  const dismissed = state.settings?.dismissedUpdateVersion || null;
+  const show = !!(
+    u?.updateAvailable &&
+    !u.error &&
+    u.latestVersion &&
+    u.latestVersion !== dismissed
+  );
+  el.classList.toggle("hidden", !show);
+  if (show) {
+    const txt = $("#update-notice-text");
+    if (txt) txt.textContent = `Cockpit.js v${u.latestVersion} is available.`;
+  }
+}
+
+// Apply the update in-process (download + swap), then Copilot just reloads. Shared
+// by the Settings "Update Cockpit.js" button and the popup "Update" button. Guarded
+// against concurrent applies (a second swap would race the directory rename).
+async function applyUpdate() {
+  if (updateApplying || selfUpdateApplied) return;
+  updateApplying = true;
+  const btns = [$("#update-apply"), $("#update-notice-update")];
+  for (const b of btns) if (b) b.disabled = true;
+  toast("Updating Cockpit.js…");
+  try {
+    const res = await api("/api/update/apply", {});
+    if (res?.ok) {
+      selfUpdateApplied = true;
+      const v = res.installedVersion || state.update?.latestVersion || "";
+      toast(v ? `Updated to v${v} — reloading…` : "Updated — reloading…");
+      renderUpdateNotice();
+    } else {
+      toast(res?.reason || "Couldn't update Cockpit.js.");
+    }
+  } finally {
+    updateApplying = false;
+    for (const b of btns) if (b) b.disabled = false;
+  }
 }
 
 async function runUpdateCheck(force) {
@@ -3899,10 +3960,17 @@ async function runUpdateCheck(force) {
 
 $("#update-check").addEventListener("click", () => runUpdateCheck(true));
 
-$("#update-apply").addEventListener("click", async () => {
-  const res = await api("/api/update/apply", {});
-  if (res?.ok) toast("Asked Copilot to update Cockpit.js…");
-  else toast(res?.reason || "Couldn't start the update.");
+$("#update-apply").addEventListener("click", applyUpdate);
+
+$("#update-notice-update").addEventListener("click", () => {
+  $("#update-notice").classList.add("hidden");
+  applyUpdate();
+});
+
+$("#update-notice-dismiss").addEventListener("click", () => {
+  const v = state.update?.latestVersion;
+  $("#update-notice").classList.add("hidden");
+  if (v) persistSettings({ dismissedUpdateVersion: v });
 });
 
 // Apply persisted tab order/visibility before opening the SSE stream so a custom

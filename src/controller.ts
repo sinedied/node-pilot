@@ -55,13 +55,8 @@ import {
 import { enumerateProjects } from "./projects.ts";
 import * as deps from "./deps.ts";
 import type { SafeUpdateOptions, SafeUpdateResult } from "./deps.ts";
-import {
-  DEFAULT_REPO_SLUG,
-  EXTENSION_DIR,
-  checkForUpdate,
-  buildSelfUpdatePrompt,
-  type UpdateInfo,
-} from "./update.ts";
+import { DEFAULT_REPO_SLUG, EXTENSION_DIR, checkForUpdate, type UpdateInfo } from "./update.ts";
+import { applyRelease, buildReloadPrompt } from "./self-update.ts";
 import type { TestOptions } from "./lanes.ts";
 import type {
   AppEvent,
@@ -213,6 +208,10 @@ export class Controller {
   _fetchImpl: typeof globalThis.fetch;
   _update: UpdateInfo | null;
   _updatePromise: Promise<UpdateInfo> | null;
+  // Single-flight guard for the in-process self-update: an apply downloads + swaps
+  // files, so a second concurrent apply (double-click / Settings + popup) must be
+  // rejected rather than racing the directory rename.
+  _selfUpdating: boolean;
   // Rayfin CLI/SDK update check (project-scoped). Same throttle model as the
   // self-update above, but the "latest" comes from the npm registry.
   _rayfinUpdate: RayfinUpdateInfo | null;
@@ -248,6 +247,7 @@ export class Controller {
     this._fetchImpl = fetchImpl || globalThis.fetch;
     this._update = null;
     this._updatePromise = null;
+    this._selfUpdating = false;
     this._rayfinUpdate = null;
     this._rayfinUpdatePromise = null;
     this._rayfinUpdatePromiseFor = null;
@@ -548,6 +548,7 @@ export class Controller {
       autoTest: s.autoTest,
       autoDeps: s.autoDeps,
       checkUpdatesOnLaunch: s.checkUpdatesOnLaunch,
+      dismissedUpdateVersion: s.dismissedUpdateVersion ?? null,
     };
   }
 
@@ -562,6 +563,8 @@ export class Controller {
     if (typeof patch.autoDeps === "boolean") clean.autoDeps = patch.autoDeps;
     if (typeof patch.checkUpdatesOnLaunch === "boolean")
       clean.checkUpdatesOnLaunch = patch.checkUpdatesOnLaunch;
+    if (typeof patch.dismissedUpdateVersion === "string" || patch.dismissedUpdateVersion === null)
+      clean.dismissedUpdateVersion = patch.dismissedUpdateVersion;
     const s = await saveSettings(this.cwd, clean);
     const pinnedTasks = s.pinnedTasks ?? defaultPinnedTasks(this.detection);
     return {
@@ -573,6 +576,7 @@ export class Controller {
       autoTest: s.autoTest,
       autoDeps: s.autoDeps,
       checkUpdatesOnLaunch: s.checkUpdatesOnLaunch,
+      dismissedUpdateVersion: s.dismissedUpdateVersion ?? null,
     };
   }
 
@@ -1573,23 +1577,38 @@ export class Controller {
     return this._updatePromise;
   }
 
-  // "Update Cockpit.js": hand the file swap + reload to Copilot chat. The extension
-  // can't reload itself, so this is the only path that can fully apply an update.
-  async sendCopilotSelfUpdate(): Promise<{ ok: boolean; reason?: string }> {
-    const info = await this.getUpdateInfo();
-    if (!info.updateAvailable || !info.latestVersion) {
-      return { ok: false, reason: "Cockpit.js is up to date." };
+  // "Update Cockpit.js": download the latest release and swap it over the install
+  // dir in-process — no Copilot, no `npm install` (the extension has no runtime
+  // deps). The extension can't reload itself, so the ONE remaining Copilot step is
+  // a tiny reload prompt after a successful swap. Git checkouts are refused by
+  // `applyRelease` (it won't clobber a working tree).
+  async applySelfUpdate(): Promise<{ ok: boolean; reason?: string; installedVersion?: string }> {
+    if (this._selfUpdating) return { ok: false, reason: "An update is already in progress." };
+    this._selfUpdating = true;
+    try {
+      // Force a fresh release check so we install the actual latest tag, not a
+      // possibly-stale ~6h cached one.
+      const info = await this.getUpdateInfo(true);
+      if (!info.updateAvailable || !info.latestVersion || !info.latestTag) {
+        return { ok: false, reason: "Cockpit.js is up to date." };
+      }
+      const result = await applyRelease({
+        dir: EXTENSION_DIR,
+        slug: this.repoSlug,
+        tag: info.latestTag,
+        version: info.latestVersion,
+        fetchImpl: this._fetchImpl,
+      });
+      if (!result.ok) {
+        this.log(`Self-update failed: ${result.reason}`, "error");
+        return result;
+      }
+      this.log(`Cockpit.js updated to v${info.latestVersion}; asking Copilot to reload.`);
+      await this.sendToChat(buildReloadPrompt(info.latestVersion));
+      return result;
+    } finally {
+      this._selfUpdating = false;
     }
-    const prompt = buildSelfUpdatePrompt({
-      installDir: EXTENSION_DIR,
-      currentVersion: info.currentVersion,
-      latestVersion: info.latestVersion,
-      repoSlug: this.repoSlug,
-      releaseUrl: info.releaseUrl,
-    });
-    await this.sendToChat(prompt);
-    this.log(`Asked Copilot to update Cockpit.js to v${info.latestVersion}.`);
-    return { ok: true };
   }
   async sendCopilotAuditFix(): Promise<AuditFixResult> {
     // Establish an audit baseline so we know what was fixable to begin with.
@@ -1936,7 +1955,9 @@ export class Controller {
   }
 
   // "Update Rayfin": hand the version-locked `@microsoft/rayfin-*` bump (verify +
-  // rollback) to Copilot chat, mirroring `sendCopilotSelfUpdate`.
+  // rollback) to Copilot chat. Unlike the extension self-update (which the
+  // extension applies itself), the Rayfin SDK bump runs in the user's project and
+  // needs the agent's build/lint/test verification, so it stays Copilot-driven.
   async sendCopilotRayfinUpdate(): Promise<{ ok: boolean; reason?: string }> {
     const info = await this.getRayfinUpdateInfo();
     if (!info?.updateAvailable || !info.latestVersion) {

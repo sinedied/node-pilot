@@ -133,6 +133,9 @@ export async function fetchLatestRelease(
 export interface UpdateInfo {
   currentVersion: string;
   latestVersion: string | null;
+  // The git tag of the latest release (e.g. "v1.1.0"), needed to fetch its tarball
+  // for the in-process self-update. Null when the remote couldn't be read.
+  latestTag: string | null;
   updateAvailable: boolean;
   releaseUrl: string | null;
   releaseName: string | null;
@@ -154,6 +157,7 @@ export async function checkForUpdate(
     return {
       currentVersion,
       latestVersion: null,
+      latestTag: null,
       updateAvailable: false,
       releaseUrl: null,
       releaseName: null,
@@ -164,6 +168,7 @@ export async function checkForUpdate(
   return {
     currentVersion,
     latestVersion: latest.version,
+    latestTag: latest.tag,
     updateAvailable: compareSemver(currentVersion, latest.version) < 0,
     releaseUrl: latest.htmlUrl,
     releaseName: latest.name,
@@ -211,32 +216,4 @@ export function readPackageMetaSync(extensionDir: string = EXTENSION_DIR): {
   } catch {
     return { version: "0.0.0", repoSlug: DEFAULT_REPO_SLUG };
   }
-}
-
-export interface SelfUpdatePromptInput {
-  installDir: string;
-  currentVersion: string;
-  latestVersion: string;
-  repoSlug: string;
-  releaseUrl: string | null;
-}
-
-// The prompt handed to Copilot chat when the user clicks "Update Cockpit.js". The
-// extension can't reload itself, so the agent does the file swap + reload. We give
-// it both versions, the install dir and the repo so it can pick git-pull vs
-// reinstall, but leave the exact mechanics to its judgement.
-export function buildSelfUpdatePrompt(input: SelfUpdatePromptInput): string {
-  const { installDir, currentVersion, latestVersion, repoSlug, releaseUrl } = input;
-  const lines = [
-    `A new release of the Cockpit.js extension is available: v${currentVersion} → v${latestVersion}.`,
-    "",
-    `Please update the installed extension at \`${installDir}\`:`,
-    `1. If that folder is a git checkout of \`${repoSlug}\`, fetch and check out the \`v${latestVersion}\` tag (or pull the default branch). Otherwise reinstall it from https://github.com/${repoSlug} over the same folder.`,
-    "2. Run `npm install` if its dependencies changed.",
-    "3. Reload the extension so the new version takes effect (the `extensions_reload` tool, or by restarting the Copilot app).",
-    "",
-    "Then confirm the newly installed version is running.",
-  ];
-  if (releaseUrl) lines.push("", `Release notes: ${releaseUrl}`);
-  return lines.join("\n");
 }
