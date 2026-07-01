@@ -86,21 +86,31 @@ inspiration: [coffilot](https://github.com/jdubois/coffilot). Full design in
   Cockpit.js's own install/lockfile so fixture deps never pollute Cockpit.js's
   Dependencies/Audit tab. The e2e workspace keeps its **own committed
   `e2e/package-lock.json`** (independent of the root lockfile — don't delete it as a
-  stray artifact); `e2e/**/node_modules` stays gitignored. **Two Rayfin fixtures** (see the Rayfin gotcha for the split):
+  stray artifact); `e2e/**/node_modules` stays gitignored. **Three Rayfin fixtures** (see the Rayfin gotcha for the split):
   `e2e/rayfin-app/` (`rayfin-mock-app`) is the **offline mock** — committed real-schema
   `rayfin/` files (`fabric*` `.deployments.json` + nested-provider `rayfin.yml` + `.env` /
-  `dab-config.json` / per-entity `data/<Entity>.ts` + aggregating `data/schema.ts` /
-  `functions/` + `connectors/`) so the **Rayfin tab renders fully
-  offline** (no Docker/Fabric/login/install). It deliberately enables the **forward-looking
-  `functions` + `storage` services** in its `rayfin.yml` (plus a `functions/hello` +
-  `connectors/openai` dir) so Cockpit.js's **gated** "Functions & connectors" section renders
-  here; the real `e2e/rayfin-todo-app/` (`rayfin-todo-app`) omits them so that section stays
-  **hidden** there — the two fixtures exercise both sides of the gate. `rayfin-todo-app` is
-  the **real, deployable** app (the official `todo-app-template`: real `@microsoft/rayfin-*`
-  deps, Vite + React) kept as **source only** for hands-on deploy testing. Both excluded from
+  `dab-config.json` / per-entity `data/<Entity>.ts` + aggregating `data/schema.ts`) so the
+  **Rayfin tab renders fully offline** (no Docker/Fabric/login/install). It mirrors a real
+  **stable** deploy (auth + data + static hosting only, **no** `functions`), so Cockpit.js's
+  **gated** "Functions & connectors" section stays **hidden** there. `e2e/rayfin-functions-app/`
+  (`rayfin-functions-app`) is a **real, genuinely-scaffolded experimental** app
+  (`create-rayfin@experimental … blankapp`: real Vite + React, real `1.34.0-alpha`
+  `@microsoft/rayfin-*` deps) with **functions wired by hand following the real SDK**
+  (`@microsoft/rayfin-functions` dep + `functions.enabled` in `rayfin.yml` + a real
+  `rayfin/functions/src/types.ts` `FunctionsSchema` + Azure-Functions handlers) so the gated
+  Functions section **shows** (helloWorld/add/summarize listed) — the two exercise both sides of
+  the gate. `e2e/rayfin-todo-app/` (`rayfin-todo-app`) is the **real, deployable** app (the
+  official `todo-app-template`: real `@microsoft/rayfin-*` deps, Vite + React) kept as **source
+  only** for hands-on deploy testing (stable `1.33.2`, functions hidden). All excluded from
   Biome via `"!e2e"` in `biome.json`; tsconfig/vitest/smoke already scope to
-  `src`/`public`/`test`. Dogfood by opening a Cockpit.js session at `e2e/rayfin-app/` (→ offline
-  Rayfin tab), `e2e/rayfin-todo-app/` (→ real deploy/login flow) or `e2e/` (→ monorepo
+  `src`/`public`/`test`. **Lockfile isolation**: `rayfin-functions-app`'s `1.34.0-alpha` deps
+  clash with `rayfin-todo-app`'s version-locked `1.33.2` in the shared `e2e/package-lock.json`,
+  so it's **excluded from the e2e workspace** (`workspaces: ["*", "!rayfin-functions-app"]`, an
+  npm negation glob) and carries its **own committed standalone `package-lock.json`**;
+  regenerate that lock in an isolated temp dir (running `npm install` inside the fixture resolves
+  to the excluded-member e2e root and no-ops). Dogfood by opening a Cockpit.js session at
+  `e2e/rayfin-app/` (→ offline Rayfin tab, functions hidden), `e2e/rayfin-functions-app/` (→
+  functions shown), `e2e/rayfin-todo-app/` (→ real deploy/login flow) or `e2e/` (→ monorepo
   detection signal). Mock dotfiles contain **only fabricated** values — never real secrets.
 - `.github/workflows/ci.yml` — CI (`biome ci .` → build → smoke → test) on Node 22.18 & 24.
 - `.github/workflows/release.yml` + `.releaserc.json` — semantic-release pipeline that cuts
@@ -490,24 +500,38 @@ inspiration: [coffilot](https://github.com/jdubois/coffilot). Full design in
     (a block-scoped read so `data`/`storage`/`functions` don't pick up a nested provider's
     flag), exposing `version` / `storageEnabled` / `functionsEnabled` on `RayfinConfig`
     (null = service absent, distinct from an explicit `false`).
-  - **Header / Configuration split (round 2).** The **sign-in status chip** + **Sign in**
-    button live in the **header** (`#rf-head`) — sign-in is global/CLI-resolved, so it belongs
-    with the app identity + version, not in a section. The `mssql` **dialect chip** was removed
-    from the header. The old **"Environment"** section is renamed **"Configuration"**
-    (`oct-gear`) and renders labeled `rayfin.yml` fields: **Auth** (Fabric SSO), **Database**
-    (dialect, moved from the header), **App version**, **Static hosting** (folder + build
-    command), **Storage** (Enabled/Disabled). It keeps the Start button (see below).
-  - **Functions & connectors is gated (round 2).** `#rf-functions-section` is **hidden** unless
-    the project actually declares/ships them — `config.functionsEnabled === true` **or** a real
-    `functions/`/`connectors/` dir is present (`renderRayfin`). Reason: **no Rayfin CLI backs
-    functions/connectors yet** — not stable (1.33.2) and not even experimental (1.34.0-alpha:
-    its scaffolder emits the same auth+data+staticHosting shape, and its CLI only exposes
-    `init/up/env/login/logout/docs`). So they're forward-looking; the `functions typegen` /
-    `connector list` lanes stay wired for when they land. The `rayfin-app` mock enables them
-    (section shown); `rayfin-todo-app` doesn't (section hidden). **No separate experimental
-    fixture was added** — an alpha fixture would clash with the todo-app's version-locked
-    `^1.33.2` deps in the shared `e2e` lockfile, and functions can't be authentically scaffolded
-    anyway, so the mock carries the "functions enabled" case instead.
+  - **Header / Configuration split (round 2, refined round 3).** The **sign-in status chip** +
+    a **single contextual auth button** live in the **header** (`#rf-head`) — sign-in is
+    global/CLI-resolved, so it belongs with the app identity + version, not in a section. The
+    auth button (`#rf-auth-btn`) is **contextual** (round 3): `auth.signedIn === true` →
+    **"Sign out"** (`oct-sign-out`, `data-rf-cli="logout"`), else **"Sign in"** (`oct-sign-in`,
+    `login`) — killing the old redundant "Signed in" chip + "Sign in" button pairing; the
+    status chip still shows Signed in / Signed out / Unknown, only the action flips. The `mssql`
+    **dialect chip** was removed from the header. The old **"Environment"** section is renamed
+    **"Configuration"** (`oct-gear`) and renders labeled `rayfin.yml` fields as a **responsive
+    2-column grid** (round 3: `.rf-env` = `grid-template-columns: repeat(auto-fill,
+    minmax(240px, 1fr))`, 1 col narrow / 2+ wide, values ellipsis-truncated with a `title`):
+    **Auth** (Fabric SSO), **Database** (dialect), **App version**, **Static hosting** (folder +
+    build command), **Storage** (Enabled/Disabled). It is now a pure read-only info block — the
+    **Start dev server** button moved to the header (round 3, see below).
+  - **Functions & connectors is gated (round 2, real fixture round 3).** `#rf-functions-section`
+    is **hidden** unless the project actually declares/ships them — `config.functionsEnabled ===
+    true` **or** a real functions/connectors present (`renderRayfin`). **`@microsoft/rayfin-functions`
+    is a real, published (experimental) SDK** — client surface `client.functions.<name>.invoke(...)`,
+    schema in `rayfin/functions/src/types.ts` (`type … = { helloWorld: { input; output } }
+    satisfies FunctionsSchema`), functions run as Azure Functions (`RAYFIN_FUNCTIONS_PORT=7071`).
+    BUT the **tooling** has no functions support yet: `create-rayfin --services` only offers
+    `auth,data,storage`, and the CLI (even `@experimental`) exposes only
+    `init/up/env/login/logout/docs` — no `functions`/`connector` commands. So the section is
+    forward-looking; the `functions typegen` / `connector list` lanes stay wired for when they
+    land. The `e2e/rayfin-functions-app/` fixture is a **real experimental scaffold with functions
+    wired by hand per the real SDK** (section shown); `rayfin-app`/`rayfin-todo-app` omit functions
+    (section hidden). **Parser** (`src/rayfin.ts`): `readFunctions(dir)` derives function names from
+    the **`FunctionsSchema` keys** in `rayfin/functions/src/types.ts` via the exported, unit-tested
+    **`parseFunctionsSchema(text)`** (a **brace-depth-aware** top-level-key walker — a flat `[^}]*`
+    capture like `parseSchemaRegistration` would stop at the first nested `}`), with a **fallback**
+    to the legacy per-subdir `listDirs(functions)` layout. Connectors still read via `listDirs` (dir
+    convention unclear; no fake connector invented).
   - **`ALLOWED_COMMANDS`** lists only real, still-wired shapes: `login`, `logout`, `up`,
     `up status`, `up db apply`, `functions typegen`, `connector list`, `init ai-files
     install`. The fabricated `dev start`/`dev stop`/`dev status`/`dev db apply` and the old
@@ -516,11 +540,12 @@ inspiration: [coffilot](https://github.com/jdubois/coffilot). Full design in
   - **Local-dev controls were removed (Item 1).** Local-with-remote-backend dev isn't wired,
     so the `dev stop` / `dev status` / `dev db apply` ("Apply to local") buttons were
     **deleted** from `index.html` (re-add them when it lands). **"Start dev server"**
-    (`#rf-start-env`, formerly "Start local" → "Start env") now lives in the **Configuration**
-    section and launches the project's dev server — it calls `/api/dev/start` + `showTab("preview")`,
-    exactly like the Preview tab's Start. For a Rayfin app that dev server talks to the
-    **remote** backend (hence "dev server", not "local"). The Fabric-section `up status` /
-    `up db apply` ("Apply to Fabric") buttons are real and stay.
+    (`#rf-start-env`, formerly "Start local" → "Start env") now lives in the **header**
+    (`#rf-head`, round 3 — moved out of the Configuration section) and launches the project's dev
+    server — it calls `/api/dev/start` + `showTab("preview")`, exactly like the Preview tab's
+    Start. For a Rayfin app that dev server talks to the **remote** backend (hence "dev server",
+    not "local"). The Fabric-section `up status` / `up db apply` ("Apply to Fabric") buttons are
+    real and stay.
   - **Agent files (Item 5):** `hasRayfinAgentFiles()` checks the CLI's `rayfin/.lockfile.json`
     marker (falls back to `AGENTS.md` + `.mcp.json`). The "Set up agent files" button runs the
     real `init ai-files install` lane, uses a non-Copilot icon (`oct-tools` — it's a CLI
@@ -546,17 +571,26 @@ inspiration: [coffilot](https://github.com/jdubois/coffilot). Full design in
     recurring Copilot handoff — project-scoped, **not** `[data-global]`, unlike the
     extension self-update). The client fires the check once per installed version on Rayfin
     load (`cli.checkedAt == null`).
-  - **Two e2e fixtures (Item 4):** `e2e/rayfin-app/` is the **offline mock**
-    (`rayfin-mock-app`) — its committed `rayfin/` files use the **real** schema
-    (`fabric*` deployment fields + nested-provider `rayfin.yml`) so the offline render matches
-    a real deploy (all three deployment links appear), and it additionally enables the
-    forward-looking **`functions` + `storage`** services (+ a `functions/hello` &
-    `connectors/openai` dir) so the gated Functions section renders. `e2e/rayfin-todo-app/`
-    (`rayfin-todo-app`) is the **real, deployable** app — the official `todo-app-template`
-    (real `@microsoft/rayfin-*` deps, Vite + React), kept as **source only** (excluded from
-    Cockpit.js's install/lockfile, biome, tsc, vitest, smoke). The two can't share a package name
-    (same `e2e` workspace root), hence the mock's `rayfin-mock-app` rename. A deploy's
-    `rayfin/.env` is auto-gitignored (`*.env*`); the mock's `.env` is already tracked.
+  - **Three e2e fixtures (Item 4, round 3):** `e2e/rayfin-app/` (`rayfin-mock-app`) is the
+    **offline mock** — its committed `rayfin/` files use the **real** schema (`fabric*`
+    deployment fields + nested-provider `rayfin.yml`) so the offline render matches a real deploy
+    (all three deployment links appear). It mirrors a **stable** deploy (auth + data + static
+    hosting, **no** functions), so the gated Functions section stays hidden. `e2e/rayfin-functions-app/`
+    (`rayfin-functions-app`) is a **real, genuinely-scaffolded experimental** app (`create-rayfin
+    @experimental … blankapp`: real Vite + React, real `1.34.0-alpha` `@microsoft/rayfin-*` deps)
+    with **functions wired by hand following the real SDK** (`@microsoft/rayfin-functions` dep +
+    `functions.enabled` in `rayfin.yml` + real `rayfin/functions/src/types.ts` `FunctionsSchema`
+    with helloWorld/add/summarize + `@azure/functions` handlers), so the gated Functions section
+    **shows**. Because its `1.34.0-alpha` deps clash with `rayfin-todo-app`'s version-locked
+    `1.33.2` in the shared `e2e/package-lock.json`, it's **excluded from the e2e workspace**
+    (`workspaces: ["*", "!rayfin-functions-app"]`) and carries its **own committed standalone
+    `package-lock.json`** (regenerate it in an isolated temp dir — `npm install` inside the fixture
+    resolves to the excluded-member e2e root and no-ops). `e2e/rayfin-todo-app/` (`rayfin-todo-app`)
+    is the **real, deployable** app — the official `todo-app-template` (real `@microsoft/rayfin-*`
+    deps, Vite + React), kept as **source only** (excluded from Cockpit.js's install/lockfile,
+    biome, tsc, vitest, smoke). The mock's `rayfin-mock-app` rename avoids a package-name clash with
+    the others under the shared `e2e` workspace root. A deploy's `rayfin/.env` is auto-gitignored
+    (`*.env*`); the mock's `.env` is already tracked.
 
 ## Workflow
 
