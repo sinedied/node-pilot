@@ -1,0 +1,21 @@
+# Dependencies
+node_modules
+
+# Build output
+dist
+dist-ssr
+*.tsbuildinfo
+.vite
+
+# Test coverage
+coverage
+
+# Local env files
+*.local
+
+# Rayfin — auto-generated or secret-bearing files from a real deploy.
+# These carry real Fabric workspace IDs / deployment URLs and must never be
+# committed (this fixture is kept source-only for hands-on deploy testing).
+rayfin/.env*
+rayfin/.deployments.json
+rayfin/.temp/
