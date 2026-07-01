@@ -3,17 +3,17 @@
 Permanent, committed test apps used to dogfood Cockpit.js tabs and detection.
 
 This folder is **its own workspace root** (`package.json` declares
-`"workspaces": ["*"]`) and is intentionally **not** part of Cockpit's root
-install — its dependencies never land in Cockpit's own lockfile or its
-Dependencies/Audit tab. It is excluded from Cockpit's biome/tsc/vitest/smoke.
+`"workspaces": ["*"]`) and is intentionally **not** part of Cockpit.js's root
+install — its dependencies never land in Cockpit.js's own lockfile or its
+Dependencies/Audit tab. It is excluded from Cockpit.js's biome/tsc/vitest/smoke.
 
 ## How to use
 
-- Open a Cockpit session pointed at **`e2e/`** → Cockpit detects a **monorepo**
+- Open a Cockpit.js session pointed at **`e2e/`** → Cockpit.js detects a **monorepo**
   (the `workspaces` field).
-- Open a Cockpit session pointed at **`e2e/rayfin-app/`** → the **offline mock**
+- Open a Cockpit.js session pointed at **`e2e/rayfin-app/`** → the **offline mock**
   Rayfin project; the Rayfin tab renders fully with no install/login/Docker.
-- Open a Cockpit session pointed at **`e2e/rayfin-todo-app/`** → a **real,
+- Open a Cockpit.js session pointed at **`e2e/rayfin-todo-app/`** → a **real,
   deployable** Rayfin app (the official `todo-app-template`) for exercising
   login / deploy / workspace-switch against your own Fabric account.
 

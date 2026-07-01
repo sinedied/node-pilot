@@ -3,7 +3,7 @@
 A minimal [Microsoft Rayfin](https://github.com/microsoft/rayfin) app used to
 dogfood the Cockpit.js **Rayfin tab**.
 
-Open a Cockpit session pointed at this folder. Cockpit detects Rayfin from
+Open a Cockpit.js session pointed at this folder. Cockpit.js detects Rayfin from
 `rayfin/rayfin.yml` + the `@microsoft/rayfin*` dependencies and shows the Rayfin
 tab. The dashboard renders **offline** from the committed mock files below — no
 install, Docker, Fabric or login needed:

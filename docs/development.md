@@ -17,7 +17,7 @@ npm run lint           # Biome lint (npm run lint:fix to autofix)
 npm run format         # format with Biome (npm run format:check to verify)
 ```
 
-This repo also dogfoods Cockpit's **Dev** and web **Build** lanes with an Astro + Starlight
+This repo also dogfoods Cockpit.js's **Dev** and web **Build** lanes with an Astro + Starlight
 docs site under `docs/site/`: `npm run dev` starts it (auto-detected, served at
 `http://localhost:4321/`) and `npm run docs:build` builds it.
 

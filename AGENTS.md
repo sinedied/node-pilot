@@ -69,21 +69,21 @@ inspiration: [coffilot](https://github.com/jdubois/coffilot). Full design in
 - `docs/site/` — a self-contained Astro + Starlight docs site (its own
   `astro.config.mjs` + `src/`), run via `astro --root docs/site`, so it never
   touches the extension's own `src/` or `public/`. It exists to **dogfood**
-  Cockpit's own Dev lane (`npm run dev` → Astro detected → `localhost:4321`
+  Cockpit.js's own Dev lane (`npm run dev` → Astro detected → `localhost:4321`
   preview) and web Build (`npm run docs:build`). Edit docs content under
   `docs/site/src/content/docs/`. **astro 7 + `@astrojs/starlight` 0.41.x**: upgraded
   from astro 6 once Starlight shipped astro-7 support (0.41.1 peer-requires `astro ^7.0.2`
   and pulls `@astrojs/mdx@^7` + `astro-expressive-code@^0.44`). astro + starlight are
   **mutually peer-coupled** — bump them together, and after any change verify BOTH
   `npm run docs:build` AND `npm run dev` (the `npm run check` suite does NOT exercise the
-  docs site). Cockpit's own `update_dependencies` can't do this coupled bump (its
+  docs site). Cockpit.js's own `update_dependencies` can't do this coupled bump (its
   per-package bisection rolls them back independently) — upgrade them by hand with a clean
   resolve (`rm -rf node_modules package-lock.json && npm install`).
 - `.github/extensions/cockpit/extension.mjs` — dog-food wrapper that imports the
   root `extension.mjs` so the repo runs the extension against itself.
 - `e2e/` — **permanent dogfood fixtures**, its own npm **workspace root**
   (`package.json` with `workspaces:["*"]`, name `cockpit-e2e`) kept **out** of
-  Cockpit's own install/lockfile so fixture deps never pollute Cockpit's
+  Cockpit.js's own install/lockfile so fixture deps never pollute Cockpit.js's
   Dependencies/Audit tab. The e2e workspace keeps its **own committed
   `e2e/package-lock.json`** (independent of the root lockfile — don't delete it as a
   stray artifact); `e2e/**/node_modules` stays gitignored. **Two Rayfin fixtures** (see the Rayfin gotcha for the split):
@@ -95,7 +95,7 @@ inspiration: [coffilot](https://github.com/jdubois/coffilot). Full design in
   the **real, deployable** app (the official `todo-app-template`: real `@microsoft/rayfin-*`
   deps, Vite + React) kept as **source only** for hands-on deploy testing. Both excluded from
   Biome via `"!e2e"` in `biome.json`; tsconfig/vitest/smoke already scope to
-  `src`/`public`/`test`. Dogfood by opening a Cockpit session at `e2e/rayfin-app/` (→ offline
+  `src`/`public`/`test`. Dogfood by opening a Cockpit.js session at `e2e/rayfin-app/` (→ offline
   Rayfin tab), `e2e/rayfin-todo-app/` (→ real deploy/login flow) or `e2e/` (→ monorepo
   detection signal). Mock dotfiles contain **only fabricated** values — never real secrets.
 - `.github/workflows/ci.yml` — CI (`biome ci .` → build → smoke → test) on Node 22.18 & 24.
@@ -483,7 +483,7 @@ inspiration: [coffilot](https://github.com/jdubois/coffilot). Full design in
     `up status`, `up db apply`, `functions typegen`, `connector list`, `init ai-files
     install`. The fabricated `dev start`/`dev stop`/`dev status`/`dev db apply` and the old
     `ai-files` shape were dropped — `rayfin dev` is a **Docker-based local backend** that
-    Cockpit doesn't surface yet.
+    Cockpit.js doesn't surface yet.
   - **Local-dev controls were removed (Item 1).** Local-with-remote-backend dev isn't wired,
     so the `dev stop` / `dev status` / `dev db apply` ("Apply to local") buttons were
     **deleted** from `index.html` (re-add them when it lands). **"Start env"**
@@ -523,7 +523,7 @@ inspiration: [coffilot](https://github.com/jdubois/coffilot). Full design in
     a real deploy (all three deployment links appear). `e2e/rayfin-todo-app/`
     (`rayfin-todo-app`) is the **real, deployable** app — the official `todo-app-template`
     (real `@microsoft/rayfin-*` deps, Vite + React), kept as **source only** (excluded from
-    Cockpit's install/lockfile, biome, tsc, vitest, smoke). The two can't share a package name
+    Cockpit.js's install/lockfile, biome, tsc, vitest, smoke). The two can't share a package name
     (same `e2e` workspace root), hence the mock's `rayfin-mock-app` rename. A deploy's
     `rayfin/.env` is auto-gitignored (`*.env*`); the mock's `.env` is already tracked.
 
@@ -577,7 +577,7 @@ The agent dev loop for any change:
 
 ## Self-update & release pipeline
 
-Cockpit checks for newer releases of itself and lets Copilot apply the update; an
+Cockpit.js checks for newer releases of itself and lets Copilot apply the update; an
 automated GitHub Actions pipeline cuts those releases. The two halves are coupled — the
 update-check reads exactly the Releases the pipeline produces — so keep them in lockstep.
 
@@ -668,7 +668,7 @@ update-check reads exactly the Releases the pipeline produces — so keep them i
   core-depends on `@semantic-release/npm` → `npm` (latest), which **bundles** an old
   `undici` inside its own tarball (`node_modules/npm/node_modules/undici`). Bundled deps
   can't be rewritten by npm `overrides` or `npm audit fix` (both verified no-ops), and npm
-  is already at its latest release. It surfaces in `npm audit` / the Cockpit audit as 1 high.
+  is already at its latest release. It surfaces in `npm audit` / the Cockpit.js audit as 1 high.
   **Risk ≈ 0:** it only runs in the CI release job (node-gyp during native builds), never in
   the shipped extension, and `@semantic-release/npm` runs `npmPublish: false`. The only way
   to eliminate it is to drop semantic-release for **release-please** (a GitHub Action with
