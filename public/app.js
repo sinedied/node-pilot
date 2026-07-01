@@ -1437,6 +1437,15 @@ function renderRayfin() {
   auth.textContent =
     signedIn === true ? "Signed in" : signedIn === false ? "Signed out" : "Unknown";
   auth.className = `rf-chip ${signedIn === true ? "ok" : "muted"}`;
+  // Contextual action: offer "Sign out" when signed in, "Sign in" otherwise
+  // (also when unknown, so an attempt is still possible). The delegated
+  // [data-rf-cli] handler dispatches on the attribute, so flipping it is enough.
+  const authBtn = $("#rf-auth-btn");
+  if (authBtn) {
+    const out = signedIn === true;
+    authBtn.dataset.rfCli = out ? "logout" : "login";
+    authBtn.innerHTML = `<svg class="oi" aria-hidden="true"><use href="#oct-sign-${out ? "out" : "in"}" /></svg>${out ? "Sign out" : "Sign in"}`;
+  }
 
   // Configuration: deployed auth method + database + app version + hosting +
   // storage, read from rayfin.yml. The Rayfin tab targets Fabric deploys, whose
@@ -1444,21 +1453,19 @@ function renderRayfin() {
   // not-yet-supported local backend, so we don't surface them here.
   const cfg = r.config || {};
   const rows = [];
+  const kv = (label, value) =>
+    `<div class="rf-kv"><span>${label}</span><b title="${esc(value)}">${esc(value)}</b></div>`;
   const authLabel = (cfg.authMethods || []).includes("fabric") ? "Fabric SSO" : "—";
-  rows.push(`<div class="rf-kv"><span>Auth</span><b>${esc(authLabel)}</b></div>`);
-  if (cfg.dialect)
-    rows.push(`<div class="rf-kv"><span>Database</span><b>${esc(cfg.dialect)}</b></div>`);
-  if (cfg.version)
-    rows.push(`<div class="rf-kv"><span>App version</span><b>${esc(cfg.version)}</b></div>`);
+  rows.push(kv("Auth", authLabel));
+  if (cfg.dialect) rows.push(kv("Database", cfg.dialect));
+  if (cfg.version) rows.push(kv("App version", cfg.version));
   const sh = cfg.staticHosting;
   if (sh?.folder) {
     const hosting = sh.buildCommand ? `${sh.folder} (${sh.buildCommand})` : sh.folder;
-    rows.push(`<div class="rf-kv"><span>Static hosting</span><b>${esc(hosting)}</b></div>`);
+    rows.push(kv("Static hosting", hosting));
   }
   if (cfg.storageEnabled != null)
-    rows.push(
-      `<div class="rf-kv"><span>Storage</span><b>${cfg.storageEnabled ? "Enabled" : "Disabled"}</b></div>`,
-    );
+    rows.push(kv("Storage", cfg.storageEnabled ? "Enabled" : "Disabled"));
   $("#rf-env").innerHTML = rows.join("\n");
 
   // Fabric workspace & deployment

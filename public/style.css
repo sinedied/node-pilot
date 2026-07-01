@@ -1825,12 +1825,26 @@ table.dep-table {
   box-shadow: 0 0 0 3px var(--focus-ring);
   border-color: var(--accent);
 }
+.rf-env {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(240px, 100%), 1fr));
+  gap: 2px 16px;
+}
 .rf-kv {
   display: flex;
   align-items: center;
   gap: 8px;
   font-size: 12px;
   padding: 2px 0;
+}
+.rf-env .rf-kv {
+  min-width: 0;
+}
+.rf-env .rf-kv > b {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .rf-kv > span:first-child {
   color: var(--dim);
