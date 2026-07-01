@@ -10,6 +10,7 @@ import {
   hasRayfinAgentFiles,
   interpretLoginStatus,
   mergeEntities,
+  parseFunctionsSchema,
   parseSchema,
   parseSchemaRegistration,
   parseYml,
@@ -335,6 +336,136 @@ describe("parseSchemaRegistration", () => {
   it("returns [] for an empty array or no registration (caller scans all files)", () => {
     expect(parseSchemaRegistration("export const schema = [];")).toEqual([]);
     expect(parseSchemaRegistration("@entity() export class Foo {}")).toEqual([]);
+  });
+});
+
+describe("parseFunctionsSchema", () => {
+  it("extracts top-level function names from a `FunctionsSchema` type", () => {
+    const src = `import type { FunctionsSchema } from '@microsoft/rayfin-functions';
+      export type AppFunctionsSchema = {
+        helloWorld: { input: { name: string }; output: string };
+        add: { input: { a: number; b: number }; output: number };
+        summarize: { input: { text: string; maxWords?: number }; output: { summary: string } };
+      } satisfies FunctionsSchema;`;
+    expect(parseFunctionsSchema(src)).toEqual(["helloWorld", "add", "summarize"]);
+  });
+
+  it("walks nested braces without stopping at the first inner `}`", () => {
+    const src = `type XSchema = {
+      a: { input: { deep: { x: 1 } }; output: void };
+      b: { input: Record<string, unknown>; output: string };
+    };`;
+    expect(parseFunctionsSchema(src)).toEqual(["a", "b"]);
+  });
+
+  it("ignores comments and returns [] when no schema is present", () => {
+    expect(parseFunctionsSchema("// helloWorld: nope\n/* add: nope */\nconst x = 1;")).toEqual([]);
+  });
+
+  it("prefers the `*FunctionsSchema` alias over an earlier helper `*Schema` type", () => {
+    const src = `type HelperSchema = { notAFunction: string };
+      export type AppFunctionsSchema = {
+        realFn: { input: { x: number }; output: number };
+      } satisfies FunctionsSchema;`;
+    expect(parseFunctionsSchema(src)).toEqual(["realFn"]);
+  });
+});
+
+describe("readRayfinState functions gating", () => {
+  let dir: string;
+
+  afterEach(async () => {
+    if (dir) await rm(dir, { recursive: true, force: true });
+  });
+
+  it("lists functions from functions/src/types.ts when functions are enabled", async () => {
+    dir = await mkdtemp(path.join(os.tmpdir(), "np-rayfin-"));
+    const rf = path.join(dir, "rayfin");
+    await mkdir(path.join(rf, "functions", "src"), { recursive: true });
+    await writeFile(
+      path.join(rf, "rayfin.yml"),
+      `name: Fn App
+version: 1.0.0
+services:
+  functions:
+    enabled: true
+`,
+    );
+    await writeFile(
+      path.join(rf, "functions", "src", "types.ts"),
+      `import type { FunctionsSchema } from '@microsoft/rayfin-functions';
+       export type AppFunctionsSchema = {
+         helloWorld: { input: { name: string }; output: string };
+         add: { input: { a: number; b: number }; output: number };
+       } satisfies FunctionsSchema;`,
+    );
+
+    const state = await readRayfinState(dir);
+    expect("functions" in state).toBe(true);
+    if (!("functions" in state)) return;
+    expect(state.functions).toEqual(["helloWorld", "add"]);
+    expect(state.config?.functionsEnabled).toBe(true);
+  });
+
+  it("reports no functions when the directory is absent (section stays gated off)", async () => {
+    dir = await mkdtemp(path.join(os.tmpdir(), "np-rayfin-"));
+    const rf = path.join(dir, "rayfin");
+    await mkdir(rf, { recursive: true });
+    await writeFile(
+      path.join(rf, "rayfin.yml"),
+      `name: Plain App
+version: 1.0.0
+services:
+  data:
+    enabled: true
+    dialect: mssql
+`,
+    );
+
+    const state = await readRayfinState(dir);
+    expect("functions" in state).toBe(true);
+    if (!("functions" in state)) return;
+    expect(state.functions).toEqual([]);
+    expect(state.config?.functionsEnabled).toBeFalsy();
+  });
+
+  it("does not surface `src` as a function when the schema file is present but empty", async () => {
+    dir = await mkdtemp(path.join(os.tmpdir(), "np-rayfin-"));
+    const rf = path.join(dir, "rayfin");
+    await mkdir(path.join(rf, "functions", "src"), { recursive: true });
+    await writeFile(path.join(rf, "rayfin.yml"), "name: Empty Fn App\nversion: 1.0.0\n");
+    // Schema file exists but declares nothing — its keys are authoritative, so the
+    // `src/` dir must NOT leak through as a bogus function via the legacy fallback.
+    await writeFile(
+      path.join(rf, "functions", "src", "types.ts"),
+      "import type { FunctionsSchema } from '@microsoft/rayfin-functions';\n",
+    );
+
+    const state = await readRayfinState(dir);
+    expect("functions" in state).toBe(true);
+    if (!("functions" in state)) return;
+    expect(state.functions).toEqual([]);
+  });
+
+  it("falls back to per-subdir listing for the legacy functions layout", async () => {
+    dir = await mkdtemp(path.join(os.tmpdir(), "np-rayfin-"));
+    const rf = path.join(dir, "rayfin");
+    await mkdir(path.join(rf, "functions", "hello"), { recursive: true });
+    await mkdir(path.join(rf, "functions", "world"), { recursive: true });
+    await writeFile(
+      path.join(rf, "rayfin.yml"),
+      `name: Legacy Fn App
+version: 1.0.0
+services:
+  functions:
+    enabled: true
+`,
+    );
+
+    const state = await readRayfinState(dir);
+    expect("functions" in state).toBe(true);
+    if (!("functions" in state)) return;
+    expect(state.functions).toEqual(["hello", "world"]);
   });
 });
 

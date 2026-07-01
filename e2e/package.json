@@ -4,6 +4,7 @@
   "private": true,
   "description": "Dogfood fixtures for Cockpit.js. This folder is its OWN workspace root (not part of Cockpit.js's root install) so opening a Cockpit.js session here exercises monorepo detection, and each sub-app exercises a feature/tab end-to-end.",
   "workspaces": [
-    "*"
+    "*",
+    "!rayfin-functions-app"
   ]
 }

@@ -334,6 +334,49 @@ export function parseSchemaRegistration(text: string): string[] {
   return [...new Set(names)];
 }
 
+// Parse the exported `FunctionsSchema` type (rayfin/functions/src/types.ts) into
+// the list of function names — its top-level keys. Each value is a
+// `{ input; output }` object literal, so a brace-depth walk is required (a flat
+// `[^}]*` capture like parseSchemaRegistration would stop at the first nested `}`).
+export function parseFunctionsSchema(text: string): string[] {
+  // Drop comments so braces/colons inside them can't confuse the walk.
+  const src = text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
+  // Prefer the canonical `…FunctionsSchema` alias (the SDK's convention); fall
+  // back to any `…Schema` object alias so a helper type named earlier in the
+  // file (e.g. `type FooSchema = {…}`) can't shadow the real functions schema.
+  const start =
+    src.match(/type\s+\w*FunctionsSchema\s*=\s*\{/) ?? src.match(/type\s+\w*Schema\s*=\s*\{/);
+  if (!start || start.index == null) return [];
+  const names: string[] = [];
+  let depth = 1; // sitting just inside the schema object's opening brace
+  let expectKey = true; // at object start / right after a depth-1 `,` or `;`
+  for (let i = start.index + start[0].length; i < src.length && depth > 0; i++) {
+    const ch = src[i];
+    if (ch === "{") {
+      depth++;
+      continue;
+    }
+    if (ch === "}") {
+      depth--;
+      continue;
+    }
+    if (depth !== 1) continue;
+    if (ch === ";" || ch === ",") {
+      expectKey = true;
+      continue;
+    }
+    if (expectKey && !/\s/.test(ch)) {
+      const km = src.slice(i).match(/^([A-Za-z_$][\w$]*)\s*\??\s*:/);
+      if (km) {
+        names.push(km[1]);
+        i += km[0].length - 1;
+      }
+      expectKey = false;
+    }
+  }
+  return [...new Set(names)];
+}
+
 function buildField(name: string, marker: string, decs: Decorator[]): RayfinField {
   const relation = decs.find((d) => d.name === "one" || d.name === "many");
   const optional =
@@ -547,7 +590,7 @@ export async function readRayfinState(cwd: string): Promise<RayfinState> {
     }
   }
 
-  const functions = await listDirs(path.join(dir, "functions"));
+  const functions = await readFunctions(dir);
   const connectors = await listDirs(path.join(dir, "connectors"));
   // Sign-in is resolved by the controller via `rayfin login status` (the CLI is
   // the source of truth — credentials may live globally, not project-local).
@@ -632,6 +675,21 @@ async function listDirs(dir: string): Promise<string[]> {
   } catch {
     return [];
   }
+}
+
+// Backend function names for the dashboard. The real (experimental) layout puts a
+// typed `FunctionsSchema` in functions/src/types.ts — its keys are the function
+// names. When that file exists its keys are authoritative (even when empty), so we
+// don't dir-list it (the `src/` dir would otherwise show up as a bogus "src"
+// function). Fall back to the legacy "one subdir per function" layout only when no
+// schema file is present.
+async function readFunctions(dir: string): Promise<string[]> {
+  const typesPath = path.join(dir, "functions", "src", "types.ts");
+  if (existsSyncSafe(typesPath)) {
+    const text = await readText(typesPath);
+    return text ? parseFunctionsSchema(text) : [];
+  }
+  return listDirs(path.join(dir, "functions"));
 }
 
 // Top-level files in `dir` with the given extension, sorted for determinism.
