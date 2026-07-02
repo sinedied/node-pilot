@@ -19,6 +19,7 @@ import { buildDepsFixPrompt } from "./fix.ts";
 import type { Controller } from "./controller.ts";
 import type {
   AuditResult,
+  AuditVulnerability,
   BumpKind,
   DepLinks,
   OutdatedEntry,
@@ -712,6 +713,53 @@ export async function safeAuditFix(controller: Controller): Promise<SafeAuditFix
     failUpdateLane(controller);
     return { ok: false, reason: err instanceof Error ? err.message : String(err) };
   }
+}
+
+export interface AuditFixOutcomeInput {
+  fixableBefore: number; // vulns with fixAvailable before `audit fix` ran
+  ran: boolean; // the package manager's audit-fix command actually executed
+  rolledBack: boolean; // audit fix broke verify and was reverted
+  remaining: AuditVulnerability[]; // vulns still present after audit fix
+}
+
+export interface AuditFixOutcome {
+  fixed: number; // fixable vulns that disappeared after audit fix
+  escalate: AuditVulnerability[]; // vulns worth handing to Copilot
+  done: boolean; // audit fix cleared everything actionable — no escalation needed
+}
+
+// Decide what (if anything) to escalate to Copilot after `<pm> audit fix`.
+//
+// After a *clean* audit fix (ran && !rolledBack), the right question is "did npm
+// hand us a concrete fix target version?". A vuln npm marks only `fixAvailable:
+// true` (a bare boolean) that *survived* a clean fix is stuck — it's bundled
+// inside another package's tarball (e.g. undici inside npm), pinned, or
+// peer-constrained — so there's no concrete version to try and a semver-safe
+// Copilot bump can't do better than `audit fix` already did. This is exactly why
+// the old "escalate anything still fixable" gate fired a futile update prompt.
+//
+// A vuln with a structured `fix.version` that survived is different: `audit fix`
+// skipped it (out of the declared range / would need `--force` / semver-major),
+// but Copilot's `update_dependencies` can install that explicit version behind
+// build+lint+test verification with auto-rollback — so escalate those (major or
+// not; `fix.version` is a superset of `fix.major`).
+//
+// When audit fix was rolled back or unavailable (bun), nothing was applied, so
+// we hand over the whole fixable set as before.
+export function classifyAuditFixOutcome({
+  fixableBefore,
+  ran,
+  rolledBack,
+  remaining,
+}: AuditFixOutcomeInput): AuditFixOutcome {
+  const remainingFixable = remaining.filter((v) => v.fixAvailable).length;
+  const fixed = Math.max(0, fixableBefore - remainingFixable);
+  const cleanFix = ran && !rolledBack;
+  const escalate = cleanFix
+    ? remaining.filter((v) => Boolean(v.fix?.version))
+    : remaining.filter((v) => v.fixAvailable);
+  const done = cleanFix && escalate.length === 0;
+  return { fixed, escalate, done };
 }
 
 // Restore package.json + lockfile to the state captured before the last update.

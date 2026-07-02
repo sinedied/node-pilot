@@ -153,6 +153,7 @@ export interface AuditFixResult {
   rolledBack?: boolean;
   fixed?: number;
   remaining?: number;
+  escalatable?: number; // vulns actually handed to Copilot (subset of remaining)
   escalated?: boolean;
 }
 
@@ -1784,29 +1785,59 @@ export class Controller {
     }
 
     const remaining = vulnerabilities;
-    const remainingFixable = remaining.filter((v) => v.fixAvailable).length;
-    const fixed = Math.max(0, fixableBefore - remainingFixable);
+    const { fixed, escalate, done } = deps.classifyAuditFixOutcome({
+      fixableBefore,
+      ran,
+      rolledBack,
+      remaining,
+    });
 
     // Step 2 — if `audit fix` cleared everything actionable, we're done. Anything
-    // left has no automatic fix, so a Copilot bump can't help it either.
-    if (ran && !rolledBack && remainingFixable === 0) {
+    // left survived a clean fix with no concrete fix target, so it's stuck
+    // (bundled/pinned/peer-constrained) and a Copilot bump can't help it either.
+    // Don't ping chat.
+    if (done) {
       this.log(
-        `Audit fix resolved ${fixed} vulnerability group(s); ${remaining.length} remain with no automatic fix.`,
+        fixed > 0
+          ? `Audit fix resolved ${fixed} vulnerability group(s); ${remaining.length} remain with no automatic fix.`
+          : `Audit fix ran; ${remaining.length} vulnerability group(s) remain with no automatic fix.`,
       );
-      return { ok: true, ran, rolledBack, fixed, remaining: remaining.length, escalated: false };
+      return {
+        ok: true,
+        ran,
+        rolledBack,
+        fixed,
+        remaining: remaining.length,
+        escalatable: 0,
+        escalated: false,
+      };
     }
 
-    // Step 3 — escalate what remains (or the full set, if audit fix rolled back or
-    // wasn't available) to Copilot.
-    const prompt = buildDepsAuditFixPrompt({ vulnerabilities: remaining });
+    // Step 3 — escalate to Copilot. Pass the full remaining set so the report is
+    // complete; `auditFixRan` tells the prompt to frame stuck no-target survivors
+    // as "investigate, don't force a bump" and only ask for the vulns npm gave a
+    // concrete fix target for (which audit fix skipped). In the rolled-back /
+    // unavailable case nothing was applied, so the whole fixable set is fair game.
+    const prompt = buildDepsAuditFixPrompt({
+      vulnerabilities: remaining,
+      auditFixRan: ran && !rolledBack,
+    });
     await this.sendToChat(prompt);
     const lead = !ran
       ? "Asked"
       : rolledBack
         ? "Audit fix broke the app and was rolled back; asked"
         : `Audit fix resolved ${fixed}; asked`;
-    this.log(`${lead} Copilot to fix ${remaining.length} vulnerability group(s).`);
-    return { ok: true, ran, rolledBack, fixed, remaining: remaining.length, escalated: true };
+    this.log(`${lead} Copilot to fix ${escalate.length} vulnerability group(s).`);
+    return {
+      ok: true,
+      ran,
+      rolledBack,
+      fixed,
+      remaining: remaining.length,
+      escalatable: escalate.length,
+      escalated: true,
+    };
   }
 
   // ---- Rayfin (Microsoft Rayfin BaaS dashboard) ---------------------------

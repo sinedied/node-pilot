@@ -6,9 +6,16 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { Controller } from "../src/controller.ts";
-import { normalizeRepoUrl, buildDepLinks, parseAudit, readDevSet } from "../src/deps.ts";
+import {
+  normalizeRepoUrl,
+  buildDepLinks,
+  parseAudit,
+  readDevSet,
+  classifyAuditFixOutcome,
+} from "../src/deps.ts";
 import { buildDepsUpdatePrompt, buildDepsAuditFixPrompt } from "../src/fix.ts";
 import { supportsAuditFix, auditFix } from "../src/pm.ts";
+import type { AuditVulnerability } from "../src/types.ts";
 
 const dir = await mkdtemp(path.join(os.tmpdir(), "np-deps-"));
 const manifest = path.join(dir, "package.json");
@@ -236,5 +243,143 @@ describe("deps Copilot prompts", () => {
     expect(p).toContain("a@1.2.3");
     expect(p).toContain("no automatic fix");
     expect(p).toContain("b");
+  });
+  it("audit-fix prompt reframes stuck no-target survivors when auditFixRan", () => {
+    const p = buildDepsAuditFixPrompt({
+      auditFixRan: true,
+      vulnerabilities: [
+        // needs a breaking major bump audit fix skipped — still actionable.
+        {
+          name: "big",
+          severity: "high",
+          range: "<2",
+          fixAvailable: true,
+          via: [],
+          advisories: [],
+          fix: { name: "big", version: "2.0.0", major: true },
+        },
+        // non-major but has a concrete target audit fix skipped — still actionable.
+        {
+          name: "pin",
+          severity: "moderate",
+          range: "<1.0.1",
+          fixAvailable: true,
+          via: [],
+          advisories: [],
+          fix: { name: "pin", version: "1.0.1", major: false },
+        },
+        // fixAvailable but no concrete target and survived a clean fix — stuck.
+        {
+          name: "undici",
+          severity: "high",
+          range: "<=6.26.0",
+          fixAvailable: true,
+          via: [],
+          advisories: [],
+        },
+      ],
+    });
+    // Both concrete targets are actionable "update" entries.
+    expect(p).toContain("big@2.0.0");
+    expect(p).toContain("major / possibly breaking");
+    expect(p).toContain("pin@1.0.1");
+    // The no-target survivor is framed as investigate-only, never "fix available".
+    expect(p).toContain("undici");
+    expect(p).toContain("could not apply it");
+    expect(p).not.toMatch(/undici[^\n]*→ fix available/);
+  });
+});
+
+describe("classifyAuditFixOutcome", () => {
+  const vuln = (over: Partial<AuditVulnerability>): AuditVulnerability => ({
+    name: "x",
+    severity: "high",
+    range: "<1",
+    fixAvailable: false,
+    via: [],
+    advisories: [],
+    ...over,
+  });
+
+  it("does not escalate a stuck non-major vuln after a clean audit fix (the undici bug)", () => {
+    // npm reports undici fixAvailable:true even though it's bundled inside npm
+    // and audit fix can't touch it — this must NOT trigger a Copilot prompt.
+    const out = classifyAuditFixOutcome({
+      fixableBefore: 1,
+      ran: true,
+      rolledBack: false,
+      remaining: [vuln({ name: "undici", fixAvailable: true })],
+    });
+    expect(out.done).toBe(true);
+    expect(out.escalate).toEqual([]);
+    expect(out.fixed).toBe(0);
+  });
+
+  it("escalates a surviving major-bump vuln after a clean audit fix", () => {
+    const major = vuln({ name: "big", fixAvailable: true, fix: { version: "2.0.0", major: true } });
+    const out = classifyAuditFixOutcome({
+      fixableBefore: 1,
+      ran: true,
+      rolledBack: false,
+      remaining: [major],
+    });
+    expect(out.done).toBe(false);
+    expect(out.escalate).toEqual([major]);
+  });
+
+  it("escalates a surviving non-major vuln that has a concrete fix target", () => {
+    // npm gave an explicit fix.version but `audit fix` skipped it (out of the
+    // declared range / needs --force). Copilot can install it explicitly under
+    // verify+rollback, so it must still be escalated even though it's not major.
+    const target = vuln({
+      name: "pin",
+      fixAvailable: true,
+      fix: { name: "pin", version: "1.0.1", major: false },
+    });
+    const out = classifyAuditFixOutcome({
+      fixableBefore: 1,
+      ran: true,
+      rolledBack: false,
+      remaining: [target],
+    });
+    expect(out.done).toBe(false);
+    expect(out.escalate).toEqual([target]);
+  });
+
+  it("reports progress: fixed = fixableBefore - remaining fixable", () => {
+    const out = classifyAuditFixOutcome({
+      fixableBefore: 3,
+      ran: true,
+      rolledBack: false,
+      remaining: [
+        vuln({ name: "big", fixAvailable: true, fix: { version: "2.0.0", major: true } }),
+      ],
+    });
+    expect(out.fixed).toBe(2);
+  });
+
+  it("escalates the full fixable set when audit fix rolled back", () => {
+    const a = vuln({ name: "a", fixAvailable: true });
+    const b = vuln({ name: "b", fixAvailable: false });
+    const out = classifyAuditFixOutcome({
+      fixableBefore: 1,
+      ran: true,
+      rolledBack: true,
+      remaining: [a, b],
+    });
+    expect(out.done).toBe(false);
+    expect(out.escalate).toEqual([a]);
+  });
+
+  it("escalates the full fixable set when audit fix was unavailable", () => {
+    const a = vuln({ name: "a", fixAvailable: true });
+    const out = classifyAuditFixOutcome({
+      fixableBefore: 1,
+      ran: false,
+      rolledBack: false,
+      remaining: [a],
+    });
+    expect(out.done).toBe(false);
+    expect(out.escalate).toEqual([a]);
   });
 });

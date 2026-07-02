@@ -4211,24 +4211,31 @@ $("#deps-audit-fix").addEventListener("click", async (e) => {
     }
     const fixed = r.fixed || 0;
     const remaining = r.remaining || 0;
+    const escalatable = r.escalatable || 0;
     if (r.escalated) {
       if (r.rolledBack) {
         toast(
-          "Audit fix would break the app — rolled back. Asked Copilot to fix it. Watch the chat.",
+          `Audit fix would break the app — rolled back. Asked Copilot to fix ${escalatable}. Watch the chat.`,
         );
       } else if (r.ran && fixed > 0) {
         toast(
-          `Audit fix resolved ${fixed}; asked Copilot for the remaining ${remaining}. Watch the chat.`,
+          `Audit fix resolved ${fixed}; asked Copilot to fix ${escalatable} more. Watch the chat.`,
         );
       } else {
-        toast("Asked Copilot to fix vulnerabilities. Watch the chat.");
+        toast(`Asked Copilot to fix ${escalatable} vulnerability group(s). Watch the chat.`);
       }
     } else {
-      const lead =
-        fixed > 0
-          ? `Audit fix resolved ${fixed} vulnerability group(s).`
-          : "Vulnerabilities fixed.";
-      toast(remaining > 0 ? `${lead} ${remaining} remain with no automatic fix.` : lead);
+      let msg;
+      if (fixed > 0) {
+        msg = `Audit fix resolved ${fixed} vulnerability group(s).`;
+        if (remaining > 0) msg += ` ${remaining} remain with no automatic fix.`;
+      } else {
+        msg =
+          remaining > 0
+            ? `No automatic fix available for ${remaining} vulnerability group(s).`
+            : "No vulnerabilities remain.";
+      }
+      toast(msg);
     }
   } finally {
     setDepsBusy(btn, false);

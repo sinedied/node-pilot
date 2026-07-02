@@ -161,20 +161,38 @@ export function buildDepsUpdatePrompt({
 
 export interface DepsAuditFixPromptInput {
   vulnerabilities: AuditVulnerability[];
+  // When true, `<pm> audit fix` already ran cleanly, so a survivor that npm only
+  // flags `fixAvailable: true` with no concrete `fix.version` is stuck (bundled /
+  // pinned / peer-constrained) and a plain version bump won't resolve it — those
+  // are framed as "investigate manually". Only vulns npm gave a concrete fix
+  // target for (which audit fix skipped) go in the actionable "update" bucket.
+  auditFixRan?: boolean;
 }
 
 // Prompt the agent to remediate known vulnerabilities: bump the packages that
 // have a fix available, verify build+lint+test, and report anything that can't be
 // fixed automatically (no fix yet, or a breaking major that needs code changes).
-export function buildDepsAuditFixPrompt({ vulnerabilities }: DepsAuditFixPromptInput): string {
-  const fixable = vulnerabilities.filter((v) => v.fixAvailable);
-  const unfixable = vulnerabilities.filter((v) => !v.fixAvailable);
-  const line = (v: AuditVulnerability) => {
-    const fix = v.fix?.version
-      ? ` → ${v.fix.name || v.name}@${v.fix.version}${v.fix.major ? " (major / possibly breaking)" : ""}`
-      : v.fixAvailable
-        ? " → fix available"
-        : " → no fix available yet";
+export function buildDepsAuditFixPrompt({
+  vulnerabilities,
+  auditFixRan = false,
+}: DepsAuditFixPromptInput): string {
+  // A vuln is actionable via a bump only if there's something concrete to try.
+  // After a clean `audit fix`, that means npm gave a concrete `fix.version` the
+  // fix skipped (out of range / needs --force / major); a bare `fixAvailable`
+  // survivor has no target and is stuck.
+  const isActionable = (v: AuditVulnerability) =>
+    auditFixRan ? Boolean(v.fix?.version) : v.fixAvailable;
+  const fixable = vulnerabilities.filter(isActionable);
+  const unfixable = vulnerabilities.filter((v) => !isActionable(v));
+  const line = (v: AuditVulnerability, actionable: boolean) => {
+    const fix =
+      actionable && v.fix?.version
+        ? ` → ${v.fix.name || v.name}@${v.fix.version}${v.fix.major ? " (major / possibly breaking)" : ""}`
+        : actionable
+          ? " → fix available"
+          : auditFixRan && v.fixAvailable
+            ? " → npm audit fix could not apply it (likely a bundled/pinned transitive dependency); investigate manually — a plain version bump won't resolve it"
+            : " → no fix available yet";
     const adv = v.advisories
       .map((a) => a.url)
       .filter(Boolean)
@@ -189,7 +207,7 @@ export function buildDepsAuditFixPrompt({ vulnerabilities }: DepsAuditFixPromptI
   if (fixable.length) {
     parts.push(
       "Vulnerabilities with a fix available:",
-      fixable.map(line).join("\n"),
+      fixable.map((v) => line(v, true)).join("\n"),
       "",
       'For these, call the **update_dependencies** tool with the fixed versions as explicit `packages` and `verify: ["build","lint","test"]` (it auto-rolls-back anything that breaks a step). Treat major-version fixes carefully — apply the code changes needed to keep build/lint/test green; if that\'s not feasible right now, leave the package and report it.',
       "",
@@ -198,7 +216,7 @@ export function buildDepsAuditFixPrompt({ vulnerabilities }: DepsAuditFixPromptI
   if (unfixable.length) {
     parts.push(
       "Vulnerabilities with no automatic fix (report these, don't force a bump):",
-      unfixable.map(line).join("\n"),
+      unfixable.map((v) => line(v, false)).join("\n"),
       "",
     );
   }

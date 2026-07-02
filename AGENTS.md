@@ -382,11 +382,23 @@ inspiration: [coffilot](https://github.com/jdubois/coffilot). Full design in
     npm/pnpm/yarn, **not bun**) and there are fixable advisories, it runs `deps.safeAuditFix()` —
     snapshot manifest+lock, stream `pm.auditFix(pm)` (semver-safe, **never `--force`**) to the
     **"update" lane**, run `defaultVerify()` (build+lint+test); **auto-rollback** if any step breaks
-    (mirrors `update_dependencies`). It then re-audits and **only escalates to Copilot for what
-    remains** (`buildDepsAuditFixPrompt` over the still-fixable vulns); if `audit fix` resolved
-    everything it does **not** ping chat. `npm audit fix` exits non-zero when vulns remain even on
+    (mirrors `update_dependencies`). It then re-audits and escalates via
+    `classifyAuditFixOutcome()` (exported from `deps.ts`, unit-tested): **after a clean
+    `audit fix` (`ran && !rolledBack`) it only escalates vulns npm gave a concrete fix target
+    for** (`v.fix?.version` — a superset of `v.fix?.major`; these are fixes `audit fix` skipped
+    because they're out of the declared range / need `--force` / are semver-major, which Copilot's
+    explicit-version `update_dependencies` can still attempt under verify+rollback). A survivor npm
+    only flags `fixAvailable:true` with **no** concrete `fix.version` is stuck (bundled/pinned/
+    peer-constrained — e.g. `undici` bundled inside `npm`), so a bump can't help it either: it's
+    reported as "remaining, no automatic fix" and **does not ping chat** (this was the "audit fix
+    ran, but a futile update prompt was still sent" bug). If audit fix rolled back or was
+    unavailable (bun), the full fixable set is escalated as before. When it does escalate,
+    `buildDepsAuditFixPrompt` gets `auditFixRan` so no-target survivors are framed "investigate
+    manually — a plain bump won't help" (never "fix available") and only concrete targets go in the
+    actionable "update" bucket. `npm audit fix` exits non-zero when vulns remain even on
     success, so the **verify suite — not the exit code — is the gate.** The richer result
-    (`{ok,ran,rolledBack,fixed,remaining,escalated}`) drives the `#deps-audit-fix` toasts.
+    (`{ok,ran,rolledBack,fixed,remaining,escalatable,escalated}`) drives the `#deps-audit-fix`
+    toasts.
   - `defaultVerify()` is **build + lint + test** (no typecheck — the Problems tab covers types).
     The in-process `safeUpdate()` loop stays as the engine the `update_dependencies` action calls;
     the buttons no longer run it directly — they hand off to the agent.
