@@ -36,7 +36,7 @@
     // receive — a screenshot of the page.
     if (ev.source !== window.parent || ev.origin !== window.location.origin) return;
     const d = ev.data;
-    if (!d || d.type !== "cockpit:capture") return;
+    if (d?.type !== "cockpit:capture") return;
     const reply = (msg) => {
       try {
         window.parent.postMessage({ ...msg, id: d.id }, window.location.origin);

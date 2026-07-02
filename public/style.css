@@ -1946,6 +1946,16 @@ table.dep-table {
 .rf-fn-pill:focus-visible {
   box-shadow: 0 0 0 3px var(--focus-ring);
 }
+/* Shared dot: base geometry + default color, used by the functions status
+   dots and the data-model entity/role dots. Declared before its
+   higher-specificity variants to keep specificity ascending. */
+.rf-dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--dim);
+}
 .rf-fn-pill .rf-dot {
   margin-right: 1px;
 }
@@ -2355,13 +2365,6 @@ table.dep-table {
 }
 .rf-entity-row.active {
   background: color-mix(in srgb, var(--accent) 14%, var(--bg-elev));
-}
-.rf-dot {
-  flex: 0 0 auto;
-  width: 8px;
-  height: 8px;
-  border-radius: 999px;
-  background: var(--dim);
 }
 .rf-dot.entity {
   background: var(--green);

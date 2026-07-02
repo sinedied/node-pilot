@@ -1184,7 +1184,7 @@ function selectRayfinEntity(name, opts = {}) {
   if (opts.fromGraph || !rfCytoscape) return;
   rfCytoscape.$("node:selected").unselect();
   const node = rfCytoscape.getElementById(name);
-  if (node && node.length) node.select();
+  if (node?.length) node.select();
 }
 
 function setRayfinModelView(view) {
@@ -1238,7 +1238,7 @@ function rfApplyGraphSelection() {
   rfCytoscape.$("node:selected").unselect();
   if (rfSelectedEntity) {
     const node = rfCytoscape.getElementById(rfSelectedEntity);
-    if (node && node.length) node.select();
+    if (node?.length) node.select();
   }
   rfUpdateEdgeLabels(null);
 }
@@ -1604,7 +1604,7 @@ function renderRayfin() {
   // The "Set up agent files" button only makes sense before they're installed
   // (`rayfin init ai-files install` is the underlying CLI command).
   $("#rf-agentfiles")?.classList.toggle("hidden", !!r.hasAgentFiles);
-  const links = (r.links && r.links.length ? r.links : RAYFIN_LINKS)
+  const links = (r.links?.length ? r.links : RAYFIN_LINKS)
     .map((l) => rfLink(l.label, l.url, l.icon))
     .join("");
   $("#rf-docs").innerHTML = `<div class="rf-kv"><span>Agent setup</span><div>${agentMsg}</div></div>
@@ -1644,7 +1644,7 @@ function rfFnHasNamedParams(fn) {
 // Build a JSON body from parsed params. `sample` fills example values.
 function rfFnBody(fn, sample) {
   const obj = {};
-  for (const p of (fn && fn.params) || [])
+  for (const p of fn?.params || [])
     obj[p.name] = sample ? rfFnSampleValue(p.type) : rfFnPlaceholder(p.type);
   return JSON.stringify(obj, null, 2);
 }
@@ -1753,7 +1753,7 @@ function renderRayfinFunctions() {
   // (or first overall) entry — never a silent jump across a filter.
   if (!rfFnSelected || !entries.some((e) => e.name === rfFnSelected)) {
     const filtered = rfFnFiltered(entries);
-    rfFnSelected = (filtered[0] || entries[0] || {}).name || null;
+    rfFnSelected = (filtered[0] || entries[0])?.name || null;
   }
   const count = $("#rf-fn-count");
   if (count) {
@@ -2414,7 +2414,7 @@ function renderProjects() {
   const wrap = $("#project-wrap");
   const sep = $("#project-sep");
   const p = state.projects;
-  const show = !!(p && p.multi);
+  const show = !!p?.multi;
   wrap.classList.toggle("hidden", !show);
   sep.classList.toggle("hidden", !show);
   if (!show) {
@@ -2432,7 +2432,7 @@ function renderProjectMenu() {
   const menu = $("#project-menu");
   menu.innerHTML = "";
   const p = state.projects;
-  if (!p || !p.projects.length) {
+  if (!p?.projects.length) {
     menu.innerHTML = '<div class="menu-empty">No projects found.</div>';
     return;
   }
@@ -2448,7 +2448,7 @@ function renderProjectMenu() {
     const isActive = proj.dir === p.active;
     const item = document.createElement("button");
     item.type = "button";
-    item.className = "more-menu-item project-item" + (isActive ? " active" : "");
+    item.className = `more-menu-item project-item${isActive ? " active" : ""}`;
     item.setAttribute("role", "menuitemradio");
     item.setAttribute("aria-checked", isActive ? "true" : "false");
     const check = document.createElement("svg");
@@ -3391,7 +3391,7 @@ function renderDebugVariables() {
     host.innerHTML = `<div class="dbg-empty">Variables appear when paused.</div>`;
     return;
   }
-  if (!dbgVars || !dbgVars.scopes) {
+  if (!dbgVars?.scopes) {
     host.innerHTML = `<div class="dbg-empty">Loading…</div>`;
     return;
   }
@@ -3873,7 +3873,7 @@ $("#dbg-stack").addEventListener("click", (e) => {
 // Expand/collapse objects in the variables tree.
 $("#dbg-vars").addEventListener("click", (e) => {
   const row = e.target.closest(".dbg-var.expandable");
-  if (!row || !row.dataset.objid) return;
+  if (!row?.dataset.objid) return;
   toggleDebugVar(row.dataset.objid);
 });
 
@@ -3974,7 +3974,7 @@ function captureViaIframe() {
     function onMsg(ev) {
       if (ev.source !== win || ev.origin !== location.origin) return;
       const d = ev.data;
-      if (!d || d.type !== "cockpit:capture:result" || d.id !== id) return;
+      if (d?.type !== "cockpit:capture:result" || d.id !== id) return;
       clearTimeout(timer);
       window.removeEventListener("message", onMsg);
       resolve(d);

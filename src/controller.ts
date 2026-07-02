@@ -47,7 +47,6 @@ import {
   hasLocalRayfinBin,
   interpretLoginStatus,
   resolveFunctionInvokeUrl,
-  resolveFunctionPathSegment,
   resolveFunctionsHostOrigin,
   rayfinDevFunctionsArgv,
   hasFuncBin,

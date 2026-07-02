@@ -138,7 +138,7 @@ function serviceBlock(text: string, service: string): { indent: number; lines: s
 // distinct from an explicit `enabled: false`.
 function serviceEnabled(text: string, service: string): boolean | null {
   const block = serviceBlock(text, service);
-  if (!block || !block.lines.length) return null;
+  if (!block?.lines.length) return null;
   // Direct children share the shallowest indentation within the block; deeper
   // lines belong to nested mappings and must be ignored.
   const childIndent = Math.min(...block.lines.map((l) => l.match(/^(\s*)/)?.[1].length ?? 0));
