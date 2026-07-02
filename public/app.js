@@ -3775,9 +3775,10 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
-$("#console-fix").addEventListener("click", (e) =>
-  api("/api/fix", { lane: e.currentTarget.dataset.lane }),
-);
+$("#console-fix").addEventListener("click", async (e) => {
+  const res = await api("/api/fix", { lane: e.currentTarget.dataset.lane });
+  if (res && res.ok === false && res.reason) toast(res.reason);
+});
 $("#test-fix").addEventListener("click", () => api("/api/fix", { lane: "test" }));
 $("#test-logs-check").addEventListener("change", (e) => {
   $("#test-raw").classList.toggle("hidden", !e.currentTarget.checked);

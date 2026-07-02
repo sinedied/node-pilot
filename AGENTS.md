@@ -431,7 +431,11 @@ inspiration: [coffilot](https://github.com/jdubois/coffilot). Full design in
   the Graph side — see the vendored-lib note above),
   `.env` → public vars, `functions/` schema + handlers) and its buttons run **allow-listed**
   `rayfin` CLI commands as Console **lanes** (`rayfin:<cmd>`, via `npm exec -- rayfin …`),
-  streamed like build/lint. **Data model is parsed from every `rayfin/data/*.ts` file**, not
+  streamed like build/lint. Like every other console lane, a Rayfin lane (and the
+  functions-host `rayfin:dev:functions`) that exits non-zero records `fixContext`, so the
+  Console **"Fix with Copilot"** button can hand its command + output to chat (a reactive
+  user-initiated diagnostic handoff — distinct from the "no proactive agent surface" rule).
+  **Data model is parsed from every `rayfin/data/*.ts` file**, not
   just `schema.ts`: canonical Rayfin defines each `@entity` in its own `data/<Entity>.ts` and
   only *registers* them in `data/schema.ts` (`type AppSchema = { Name: Name }`), so parsing
   schema.ts alone misses them. `readRayfinState` scans all `data/*.ts`, `parseSchema`s each,

@@ -193,6 +193,44 @@ describe("test runner + report", () => {
   });
 });
 
+describe("rayfin console lane fix", () => {
+  // A failed Rayfin CLI lane must record fixContext so the Console "Fix with
+  // Copilot" button (shown for any failed lane) has something to hand to chat.
+  const asRunner = (c: Controller) =>
+    c as unknown as {
+      runRayfinLane(id: string, label: string, argv: string[]): Promise<{ ok: boolean }>;
+    };
+
+  it("records fixContext on a failed lane and sends it to chat", async () => {
+    chatPrompt = null;
+    const res = await asRunner(controller).runRayfinLane("rayfin:test", "rayfin test", [
+      process.execPath,
+      "-e",
+      "console.error('boom'); process.exit(3)",
+    ]);
+    expect(res.ok).toBe(false);
+    const ctx = controller.fixContext["rayfin:test"];
+    expect(ctx).toBeTruthy();
+    expect(ctx.exitCode).toBe(3);
+    expect(ctx.command).toBe("rayfin test");
+    expect(ctx.output).toMatch(/boom/);
+
+    const fixed = await controller.fixIssue("rayfin:test");
+    expect(fixed.ok).toBe(true);
+    expect(typeof chatPrompt).toBe("string");
+  });
+
+  it("records no fixContext for a lane that succeeds", async () => {
+    const res = await asRunner(controller).runRayfinLane("rayfin:ok", "rayfin ok", [
+      process.execPath,
+      "-e",
+      "process.exit(0)",
+    ]);
+    expect(res.ok).toBe(true);
+    expect(controller.fixContext["rayfin:ok"]).toBeUndefined();
+  });
+});
+
 describe("dev server lifecycle", () => {
   it("starts, detects the URL, and stops", async () => {
     const started = await controller.startDev();

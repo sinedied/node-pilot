@@ -1165,6 +1165,14 @@ export class Controller {
       lane.exitCode = code;
       lane.endedAt = Date.now();
       lane.status = code === 0 || code === null ? "passed" : "failed";
+      // A genuine non-zero exit (not a kill / clean stop) is a failure the Console
+      // "Fix with Copilot" button can hand to chat — record its command + output.
+      if (code !== 0 && code !== null)
+        this.fixContext[laneId] = {
+          command: label,
+          output: lane.output.join(""),
+          exitCode: code,
+        };
       this.broadcast({ type: "lane:end", lane: laneId, exitCode: code, status: lane.status });
       // Only clear host state if *this* process is still the active one — a since-
       // superseded host (project switch, or a stop→start race) must not reset the
@@ -2010,6 +2018,14 @@ export class Controller {
     lane.exitCode = res.code;
     lane.endedAt = Date.now();
     lane.status = res.code === 0 ? "passed" : "failed";
+    // Record the failure so the Console "Fix with Copilot" button (shown for any
+    // failed lane) has the command + output to hand to chat, like every other lane.
+    if (res.code !== 0)
+      this.fixContext[laneId] = {
+        command: label,
+        output: lane.output.join(""),
+        exitCode: res.code,
+      };
     this.broadcast({ type: "lane:end", lane: laneId, exitCode: res.code, status: lane.status });
     // Any command may change auth / deployments / functions — refresh the model.
     await this.refreshRayfin().catch(() => {});
