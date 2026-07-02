@@ -11,3 +11,4 @@ coverage/
 .astro/
 docs/site/dist/
 *.env*
+local.settings.json
