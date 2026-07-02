@@ -92,15 +92,15 @@ inspiration: [coffilot](https://github.com/jdubois/coffilot). Full design in
   `dab-config.json` / per-entity `data/<Entity>.ts` + aggregating `data/schema.ts`) so the
   **Rayfin tab renders fully offline** (no Docker/Fabric/login/install). It mirrors a real
   **stable** deploy (auth + data + static hosting only, **no** `functions`), so Cockpit.js's
-  **gated** "Functions & connectors" section stays **hidden** there. `e2e/rayfin-functions-app/`
+  **gated** "Functions" section stays **hidden** there. `e2e/rayfin-functions-app/`
   (`rayfin-functions-app`) is a **real, genuinely-scaffolded experimental** app
   (`create-rayfin@experimental … blankapp`: real Vite + React, real `1.34.0-alpha`
   `@microsoft/rayfin-*` deps) with **functions wired by hand following the real SDK**
   (`@microsoft/rayfin-functions` dep + `functions.enabled` in `rayfin.yml` + a real
   `rayfin/functions/src/types.ts` `FunctionsSchema` + Azure-Functions handlers) so the gated
-  Functions section **shows** (helloWorld/add/summarize listed) — the two exercise both sides of
-  the gate. `e2e/rayfin-todo-app/` (`rayfin-todo-app`) is the **real, deployable** app (the
-  official `todo-app-template`: real `@microsoft/rayfin-*` deps, Vite + React) kept as **source
+  Functions section **shows** (helloWorld/add/summarize with signatures + handler status) — the
+  two exercise both sides of the gate. `e2e/rayfin-todo-app/` (`rayfin-todo-app`) is the **real,
+  deployable** app (the official `todo-app-template`: real `@microsoft/rayfin-*` deps, Vite + React) kept as **source
   only** for hands-on deploy testing (stable `1.33.2`, functions hidden). All excluded from
   Biome via `"!e2e"` in `biome.json`; tsconfig/vitest/smoke already scope to
   `src`/`public`/`test`. **Lockfile isolation**: `rayfin-functions-app`'s `1.34.0-alpha` deps
@@ -417,7 +417,7 @@ inspiration: [coffilot](https://github.com/jdubois/coffilot). Full design in
   `dab-config.json`/`data/*.ts` → data-model viewer (a **List | Graph** toggle: a two-pane
   list/detail on the List side, a Cytoscape node-link diagram of entities + relations on
   the Graph side — see the vendored-lib note above),
-  `.env` → public vars, `functions/` + connectors) and its buttons run **allow-listed**
+  `.env` → public vars, `functions/` schema + handlers) and its buttons run **allow-listed**
   `rayfin` CLI commands as Console **lanes** (`rayfin:<cmd>`, via `npm exec -- rayfin …`),
   streamed like build/lint. **Data model is parsed from every `rayfin/data/*.ts` file**, not
   just `schema.ts`: canonical Rayfin defines each `@entity` in its own `data/<Entity>.ts` and
@@ -514,29 +514,86 @@ inspiration: [coffilot](https://github.com/jdubois/coffilot). Full design in
     **Auth** (Fabric SSO), **Database** (dialect), **App version**, **Static hosting** (folder +
     build command), **Storage** (Enabled/Disabled). It is now a pure read-only info block — the
     **Start dev server** button moved to the header (round 3, see below).
-  - **Functions & connectors is gated (round 2, real fixture round 3).** `#rf-functions-section`
-    is **hidden** unless the project actually declares/ships them — `config.functionsEnabled ===
-    true` **or** a real functions/connectors present (`renderRayfin`). **`@microsoft/rayfin-functions`
-    is a real, published (experimental) SDK** — client surface `client.functions.<name>.invoke(...)`,
-    schema in `rayfin/functions/src/types.ts` (`type … = { helloWorld: { input; output } }
-    satisfies FunctionsSchema`), functions run as Azure Functions (`RAYFIN_FUNCTIONS_PORT=7071`).
-    BUT the **tooling** has no functions support yet: `create-rayfin --services` only offers
-    `auth,data,storage`, and the CLI (even `@experimental`) exposes only
-    `init/up/env/login/logout/docs` — no `functions`/`connector` commands. So the section is
-    forward-looking; the `functions typegen` / `connector list` lanes stay wired for when they
-    land. The `e2e/rayfin-functions-app/` fixture is a **real experimental scaffold with functions
-    wired by hand per the real SDK** (section shown); `rayfin-app`/`rayfin-todo-app` omit functions
-    (section hidden). **Parser** (`src/rayfin.ts`): `readFunctions(dir)` derives function names from
-    the **`FunctionsSchema` keys** in `rayfin/functions/src/types.ts` via the exported, unit-tested
-    **`parseFunctionsSchema(text)`** (a **brace-depth-aware** top-level-key walker — a flat `[^}]*`
-    capture like `parseSchemaRegistration` would stop at the first nested `}`), with a **fallback**
-    to the legacy per-subdir `listDirs(functions)` layout. Connectors still read via `listDirs` (dir
-    convention unclear; no fake connector invented).
+  - **Functions is gated (round 2, real fixture round 3, panel reworked round 4, master-detail
+    round 5).** `#rf-functions-section` is **hidden** unless the project actually declares/ships
+    them — `config.functionsEnabled === true` **or** real functions present
+    (`renderRayfinFunctions`). **`@microsoft/rayfin-functions` is a real, published (experimental)
+    SDK** — client surface `client.functions.<name>.invoke(...)`, schema in
+    `rayfin/functions/src/types.ts` (`type … = { helloWorld: { input; output } } satisfies
+    FunctionsSchema`), functions run as Azure Functions. **Two run modes** back the panel: **cloud**
+    (`rayfin up` + vite → provisioned to Fabric) and **local** (`rayfin dev functions` → verifies
+    **Azure Functions Core Tools** and spawns `func start --port 7071`, NOT Docker). The invoker's
+    `127.0.0.1:7071/api` default targets the **local** host. The **CLI ground truth** (verified via
+    `npx @microsoft/rayfin-cli@experimental --help`): it exposes **only**
+    `init/up/env/login/logout/docs` (no `functions`/`connector` verb) — so the old speculative
+    **Typegen**/**Connectors** buttons were **dead** and removed. The panel is a **master-detail
+    invoke workbench**, human-facing (**no agent action / no Copilot handoff** — user vetoed):
+    - **Parser** (`src/rayfin.ts`): `parseFunctionsSchema(text)` returns the **full contract** per
+      function (`ParsedFunction`: `name`, raw `input`/`output` type text, named `params`
+      `[{name,type,optional}]`), built on brace/bracket/generic-aware `balanced`/`splitMembers`.
+      `parseFunctionHandlers(text)` parses each `app.http("<name>", { … })` into a
+      `RayfinFunctionHandler { name; route: string|null; routeDynamic: boolean; methods: string[]|null }`
+      — a **static string** `route:` is captured; a template/param/dynamic route sets
+      `routeDynamic` (UI labels it "route unknown — verify"); `methods:` array literals are parsed
+      (absent → Azure v4 default GET+POST). Comment-stripped, dedup by name.
+    - **Handler cross-check**: `readFunctions(dir)` maps each schema key to a `RayfinFunction`
+      (adds `hasHandler`), returns `handlers: RayfinFunctionHandler[]` and `orphanHandlers` (an
+      `app.http` registration with no schema entry).
+    - **Local invoker (route-aware, hardened)**: `resolveFunctionInvokeUrl(baseUrl, name, route?)`
+      builds the POST URL under a **localhost-only** guard (http(s) + `localhost`/`127.0.0.1`/`::1`;
+      bare-identifier name; **no userinfo/query/fragment**) — the endpoint is same-origin-reachable
+      from the preview proxy, so this stops it becoming an SSRF vector. The path segment
+      (`resolveFunctionPathSegment`) is the handler's **safe static route** (param-free, no `..`,
+      allow-listed chars) else the function name. `controller.invokeRayfinFunction(name, input,
+      baseUrl)` recomputes the invokable allow-list **server-side** as `functions ∪ orphanHandlers`
+      (**never trusts the webview-posted name**), looks the route up from `st.handlers`, captures
+      `cwd`/`_projectGen` to discard results after a concurrent project switch, then does a
+      **server-side** 15s-bounded `fetch` POST (`redirect: "manual"`) and returns `{ ok, status,
+      body, ms, url, method, error? }` (the resolved `url`/`method` are echoed back for display).
+      Route: `POST /api/rayfin/functions/invoke`. **Parser caveat**: text-based, not
+      string/comment-literal aware inside a type body — best-effort by design.
+    - **Local functions-host lifecycle** (`FunctionsHostState`/`FunctionsHostStatus`, controller
+      `fnHost` + `startFunctionsHost`/`stopFunctionsHost`/`probeFunctionsHost`/`getFunctionsHostStatus`):
+      **Start** runs `rayfin dev functions` (`rayfinDevFunctionsArgv`) as a **managed persistent
+      process** streamed to the Console lane `rayfin:dev:functions`, **gated by `hasLocalRayfinBin`
+      + `hasFuncBin`** (scan PATH + walk `node_modules/.bin` for `func`) — if Core Tools is missing
+      it returns a reason + sets `funcAvailable=false` and **does not spawn** (avoids the CLI's
+      interactive Core-Tools-install prompt hanging a non-interactive lane). **Stop** kills the
+      managed process (numeric PID). **Reachability probe** = a passive GET on the **configured**
+      base URL's origin (`resolveFunctionsHostOrigin`), 2s timeout, **tri-state**
+      (`reachable: true/false/null`), never throws — reflects the host regardless of who started
+      it. Torn down on project switch (`resetProjectState` paths) and in `extension.ts onClose`.
+      Routes: `POST /api/rayfin/functions/host/{status,start,stop}`; broadcast via the
+      `rayfin:fnhost` SSE event.
+    - **UI** (master-detail, `app.js`, `#rf-functions` = `.rf-fn-2pane` mirroring the data-model
+      `.rf-model-2pane`): a searchable **list** (`#rf-fn-list`, status dot green has-handler /
+      yellow no-handler / grey **orphan**, name + meta) + live search + **"Only issues"** toggle;
+      **orphans are selectable, invokable rows**. Only **one** editor (`#rf-fn-input`) is ever
+      mounted. The **detail** (`#rf-fn-detail`) is durable: `renderRayfinFnDetail` early-returns
+      when its key (`rfFnGen::name::contractSig`) is unchanged, so a background `rayfin:state`
+      broadcast (sign-in probe / host push) re-renders only the **list**/pill — never wiping the
+      user's typed input/response. Selection/contract change calls `saveActiveDraft()` then
+      rebuilds. **Draft cache** (`rfFnDrafts: name→{text,sig}`): on a contract change the draft is
+      marked **stale** (banner + Reset, never silently reused). **In-flight isolation**
+      (`rfFnReqSeq` + `rfFnReqByName`): a late/superseded response can't land under the wrong
+      function. Detail shows the **resolved URL + method** ("local HTTP invocation") with route/POST
+      warnings, **Fill sample / Reset to skeleton** (from parsed params), **Invoke** (`.lane-btn
+      primary`; no-handler fns gated with an explicit "Invoke anyway"), and a response block with
+      **pretty/raw** toggle + **copy** + large-body **truncation**. Host **reachability pill**
+      (`#rf-fn-pill`) + **Start/Stop host** buttons + a `func`-missing hint sit in the section head;
+      `rfFnHostPoll` polls after Start until reachable. Host base URL persists in-memory
+      (`rfFnBaseUrl`). List-scoped ↑/↓ nav; Cmd/Ctrl+Enter invokes. Narrow width collapses
+      `.rf-fn-2pane` to a compact picker above the detail (`@media (max-width:560px)`). Transient
+      state (`rfFnSelected`/`rfFnFilter`/`rfFnIssuesOnly`/`rfFnDrafts`/`rfFnResponses`/`rfFnGen`/…)
+      resets in `resetRayfinTransient()`.
+    The `e2e/rayfin-functions-app/` fixture is a **real experimental scaffold with functions wired
+    by hand per the real SDK** (section shown, all three with handlers); `rayfin-app`/`rayfin-todo-app`
+    omit functions (section hidden).
   - **`ALLOWED_COMMANDS`** lists only real, still-wired shapes: `login`, `logout`, `up`,
-    `up status`, `up db apply`, `functions typegen`, `connector list`, `init ai-files
-    install`. The fabricated `dev start`/`dev stop`/`dev status`/`dev db apply` and the old
-    `ai-files` shape were dropped — `rayfin dev` is a **Docker-based local backend** that
-    Cockpit.js doesn't surface yet.
+    `up status`, `up db apply`, `init ai-files install`. The speculative `functions typegen` /
+    `connector list` (round 4) and the fabricated `dev start`/`dev stop`/`dev status`/`dev db
+    apply` + old `ai-files` shape were dropped — `rayfin dev` is a **Docker-based local backend**
+    that Cockpit.js doesn't surface yet.
   - **Local-dev controls were removed (Item 1).** Local-with-remote-backend dev isn't wired,
     so the `dev stop` / `dev status` / `dev db apply` ("Apply to local") buttons were
     **deleted** from `index.html` (re-add them when it lands). **"Start dev server"**
