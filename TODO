@@ -72,17 +72,22 @@ Instead of pills, extract proper information about the project. Suggest useful i
   * dogfooding on a fake app doesn't work. I need rayfin-todo-app to be a REAL rayfin app that I can test deploy etc.
   * Set up agents files button should call the related rayfin CLI command (if it's not already the case) and the button should only be present if the agent files are not installed.
   * First rayfin header should show the currently installed version of Rayfin in the project. If there's a newer version available, it should show a notification and a button to update to the latest version using Copilot.
+- [x] update: no notification at start start when update is available?
+  * update: do ALL the work you can without copilot, it should be necessary to burn tokens just for an update.
 
 - [ ] playwright tab?
 
-- [ ] update: no notification at start start when update is available?
-  * update: do ALL the work you can without copilot, it should be necessary to burn tokens just for an update.
-
+- [ ] Fix security: audit ran successfully, but the prompt sent still asked to update?
 
 - [ ] skill readme/prep release
   - [x] add skills (README for example)
   - [x] css
-  - [ ] logo
-  - [ ] readme
+  - [x] logo
+  - [x] readme
+  - [ ] video
+  - [ ] teams message devrel + pierce
+  - [ ] send rayfin team
+  - [ ] linkedin/x/bs
+
 
 
