@@ -476,7 +476,9 @@ describe("parseFunctionHandlers", () => {
   });
 
   it("marks a non-literal (param/dynamic) route as routeDynamic", () => {
-    const h = parseFunctionHandlers("app.http('getUser', { route: `users/${id}`, handler: h });");
+    const h = parseFunctionHandlers(
+      `app.http('getUser', { route: \`users/\${id}\`, handler: h });`,
+    );
     expect(h[0]).toMatchObject({ name: "getUser", route: null, routeDynamic: true });
   });
 
