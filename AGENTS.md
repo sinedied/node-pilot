@@ -99,7 +99,16 @@ inspiration: [coffilot](https://github.com/jdubois/coffilot). Full design in
   (`@microsoft/rayfin-functions` dep + `functions.enabled` in `rayfin.yml` + a real
   `rayfin/functions/src/types.ts` `FunctionsSchema` + Azure-Functions handlers) so the gated
   Functions section **shows** (helloWorld/add/summarize with signatures + handler status) — the
-  two exercise both sides of the gate. `e2e/rayfin-todo-app/` (`rayfin-todo-app`) is the **real,
+  two exercise both sides of the gate. It's also a **runnable** func host: `rayfin/functions/`
+  carries its own `host.json` + `package.json` (`main → dist/src/handlers.js`, `build: tsc`) +
+  self-contained `tsconfig.json` (`src/**/*` → `dist/`), and the parent `rayfin/tsconfig.json`
+  **excludes `functions/**/*`** so it isn't double-compiled. `rayfin dev functions apply` (or
+  `npm run build && func start`) builds + serves all three at `POST /api/*`. `local.settings.json`
+  is gitignored (may hold deployment IDs) and must carry `FUNCTIONS_WORKER_RUNTIME: "node"` for
+  `func start` (else "Worker runtime cannot be 'None'"); a committed `prebuild` hook
+  (`rayfin/functions/scripts/ensure-local-settings.mjs`, runs before every `npm run build`)
+  **auto-seeds** the runtime keys (adds only missing keys, preserves deployment values), so a
+  fresh clone works with no manual editing. `e2e/rayfin-todo-app/` (`rayfin-todo-app`) is the **real,
   deployable** app (the official `todo-app-template`: real `@microsoft/rayfin-*` deps, Vite + React) kept as **source
   only** for hands-on deploy testing (stable `1.33.2`, functions hidden). All excluded from
   Biome via `"!e2e"` in `biome.json`; tsconfig/vitest/smoke already scope to
