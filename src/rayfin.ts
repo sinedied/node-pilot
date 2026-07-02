@@ -16,6 +16,9 @@ import type {
   RayfinDetection,
   RayfinEntity,
   RayfinField,
+  RayfinFunction,
+  RayfinFunctionHandler,
+  RayfinFunctionParam,
   RayfinPermission,
   RayfinState,
 } from "./types.ts";
@@ -335,10 +338,69 @@ export function parseSchemaRegistration(text: string): string[] {
 }
 
 // Parse the exported `FunctionsSchema` type (rayfin/functions/src/types.ts) into
-// the list of function names — its top-level keys. Each value is a
-// `{ input; output }` object literal, so a brace-depth walk is required (a flat
-// `[^}]*` capture like parseSchemaRegistration would stop at the first nested `}`).
-export function parseFunctionsSchema(text: string): string[] {
+// the full contract of each function — not just its name, but the raw `input`
+// and `output` type text and the named input params. Each schema value is a
+// `{ input; output }` object literal (whose `input` is itself an object of named
+// params), so a brace-aware walk is required — a flat regex would stop at the
+// first nested `}`.
+export type ParsedFunction = Omit<RayfinFunction, "hasHandler">;
+
+// Return the substring *inside* the balanced `{…}` (or `[...]`/`(...)`) whose
+// opening bracket is at `open` in `src`, or "" when unbalanced.
+function balanced(src: string, open: number): string {
+  const close = src[open] === "{" ? "}" : src[open] === "[" ? "]" : ")";
+  let depth = 0;
+  for (let i = open; i < src.length; i++) {
+    const ch = src[i];
+    if (ch === src[open]) depth++;
+    else if (ch === close) {
+      depth--;
+      if (depth === 0) return src.slice(open + 1, i);
+    }
+  }
+  return "";
+}
+
+interface Member {
+  key: string;
+  optional: boolean;
+  value: string;
+}
+
+// Split the body of a TS object/type literal into its top-level `key: value`
+// members. Separators are `;` or `,` at depth 0; nested braces/brackets/parens
+// and generic `<…>` are tracked so a `,` inside `Record<string, unknown>` or a
+// nested `{ … }` doesn't split a member.
+function splitMembers(body: string): Member[] {
+  const members: Member[] = [];
+  let depth = 0;
+  let angle = 0;
+  let start = 0;
+  const flush = (end: number) => {
+    const seg = body.slice(start, end).trim();
+    start = end + 1;
+    if (!seg) return;
+    const m = seg.match(/^([A-Za-z_$][\w$]*)\s*(\??)\s*:\s*([\s\S]*)$/);
+    if (m) members.push({ key: m[1], optional: m[2] === "?", value: m[3].trim() });
+  };
+  for (let i = 0; i < body.length; i++) {
+    const ch = body[i];
+    if (ch === "{" || ch === "[" || ch === "(") depth++;
+    else if (ch === "}" || ch === "]" || ch === ")") depth--;
+    else if (ch === "<") angle++;
+    else if (ch === ">") {
+      // Only treat `>` as a generic close when an unmatched `<` is open, so the
+      // `>` in a `=>` arrow type can't drive the depth negative.
+      if (angle > 0) angle--;
+    } else if ((ch === ";" || ch === ",") && depth === 0 && angle === 0) {
+      flush(i);
+    }
+  }
+  flush(body.length);
+  return members;
+}
+
+export function parseFunctionsSchema(text: string): ParsedFunction[] {
   // Drop comments so braces/colons inside them can't confuse the walk.
   const src = text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
   // Prefer the canonical `…FunctionsSchema` alias (the SDK's convention); fall
@@ -347,34 +409,33 @@ export function parseFunctionsSchema(text: string): string[] {
   const start =
     src.match(/type\s+\w*FunctionsSchema\s*=\s*\{/) ?? src.match(/type\s+\w*Schema\s*=\s*\{/);
   if (!start || start.index == null) return [];
-  const names: string[] = [];
-  let depth = 1; // sitting just inside the schema object's opening brace
-  let expectKey = true; // at object start / right after a depth-1 `,` or `;`
-  for (let i = start.index + start[0].length; i < src.length && depth > 0; i++) {
-    const ch = src[i];
-    if (ch === "{") {
-      depth++;
-      continue;
-    }
-    if (ch === "}") {
-      depth--;
-      continue;
-    }
-    if (depth !== 1) continue;
-    if (ch === ";" || ch === ",") {
-      expectKey = true;
-      continue;
-    }
-    if (expectKey && !/\s/.test(ch)) {
-      const km = src.slice(i).match(/^([A-Za-z_$][\w$]*)\s*\??\s*:/);
-      if (km) {
-        names.push(km[1]);
-        i += km[0].length - 1;
+  const open = start.index + start[0].length - 1; // index of the schema's `{`
+  const body = balanced(src, open);
+  const out: ParsedFunction[] = [];
+  const seen = new Set<string>();
+  for (const fn of splitMembers(body)) {
+    if (seen.has(fn.key)) continue;
+    seen.add(fn.key);
+    let input = "";
+    let output = "";
+    const val = fn.value.trim();
+    if (val.startsWith("{")) {
+      for (const m of splitMembers(balanced(val, 0))) {
+        if (m.key === "input") input = m.value.trim();
+        else if (m.key === "output") output = m.value.trim();
       }
-      expectKey = false;
     }
+    let params: RayfinFunctionParam[] = [];
+    if (input.startsWith("{")) {
+      params = splitMembers(balanced(input, 0)).map((p) => ({
+        name: p.key,
+        type: p.value,
+        optional: p.optional,
+      }));
+    }
+    out.push({ name: fn.key, input, output, params });
   }
-  return [...new Set(names)];
+  return out;
 }
 
 function buildField(name: string, marker: string, decs: Decorator[]): RayfinField {
@@ -590,8 +651,7 @@ export async function readRayfinState(cwd: string): Promise<RayfinState> {
     }
   }
 
-  const functions = await readFunctions(dir);
-  const connectors = await listDirs(path.join(dir, "connectors"));
+  const { functions, orphanHandlers, handlers } = await readFunctions(dir);
   // Sign-in is resolved by the controller via `rayfin login status` (the CLI is
   // the source of truth — credentials may live globally, not project-local).
   // `null` here is the "unknown" placeholder until that probe runs.
@@ -605,7 +665,8 @@ export async function readRayfinState(cwd: string): Promise<RayfinState> {
     deployments: { active, list },
     entities,
     functions,
-    connectors,
+    orphanHandlers,
+    handlers,
     cli: {
       // Installed version is a cheap sync read; the controller overlays the
       // (network) latest/update-available fields from its throttled check.
@@ -677,19 +738,142 @@ async function listDirs(dir: string): Promise<string[]> {
   }
 }
 
-// Backend function names for the dashboard. The real (experimental) layout puts a
-// typed `FunctionsSchema` in functions/src/types.ts — its keys are the function
-// names. When that file exists its keys are authoritative (even when empty), so we
-// don't dir-list it (the `src/` dir would otherwise show up as a bogus "src"
-// function). Fall back to the legacy "one subdir per function" layout only when no
-// schema file is present.
-async function readFunctions(dir: string): Promise<string[]> {
-  const typesPath = path.join(dir, "functions", "src", "types.ts");
+// Read the backend functions for the dashboard: the typed contract from
+// functions/src/types.ts (its `FunctionsSchema` keys are the function names,
+// authoritative even when empty — so we don't dir-list `src/` as a bogus "src"
+// function) cross-checked against the `app.http(...)` registrations in
+// functions/src/handlers.ts. Falls back to the legacy "one subdir per function"
+// layout (no signature info) only when no schema file is present. Also surfaces
+// `orphanHandlers`: handlers registered with no matching schema entry.
+async function readFunctions(dir: string): Promise<{
+  functions: RayfinFunction[];
+  orphanHandlers: string[];
+  handlers: RayfinFunctionHandler[];
+}> {
+  const fnDir = path.join(dir, "functions");
+  const handlers = await readFunctionHandlers(fnDir);
+  const hset = new Set(handlers.map((h) => h.name));
+  let functions: RayfinFunction[];
+  const typesPath = path.join(fnDir, "src", "types.ts");
   if (existsSyncSafe(typesPath)) {
     const text = await readText(typesPath);
-    return text ? parseFunctionsSchema(text) : [];
+    const sigs = text ? parseFunctionsSchema(text) : [];
+    functions = sigs.map((s) => ({ ...s, hasHandler: hset.has(s.name) }));
+  } else {
+    functions = (await listDirs(fnDir)).map((name) => ({
+      name,
+      input: "",
+      output: "",
+      params: [],
+      hasHandler: hset.has(name),
+    }));
   }
-  return listDirs(path.join(dir, "functions"));
+  const known = new Set(functions.map((f) => f.name));
+  const orphanHandlers = handlers.filter((h) => !known.has(h.name)).map((h) => h.name);
+  return { functions, orphanHandlers, handlers };
+}
+
+// Parse the `app.http("<name>", { … })` registrations in the functions'
+// handlers.ts (Azure Functions v4 model). Returns each name plus best-effort
+// *static* route/method info (only string-literal `route:` and array-of-literal
+// `methods:` are resolved; anything computed is flagged, never guessed). Tolerant
+// of single/double/backtick quotes.
+async function readFunctionHandlers(fnDir: string): Promise<RayfinFunctionHandler[]> {
+  const text = await readText(path.join(fnDir, "src", "handlers.ts"));
+  if (!text) return [];
+  return parseFunctionHandlers(text);
+}
+
+// Unwrap a single-quoted / double-quoted / backtick string literal to its inner
+// text, or null when the value isn't a plain string literal (template with
+// `${…}`, an identifier, etc. — i.e. not statically resolvable).
+function stringLiteral(value: string): string | null {
+  const v = value.trim();
+  const m = v.match(/^(['"`])([^'"`]*)\1$/);
+  if (!m) return null;
+  if (m[1] === "`" && m[2].includes("${")) return null;
+  return m[2];
+}
+
+// Parse a `methods:` value into upper-cased HTTP verbs, or null when it isn't a
+// static array of string literals (a spread, an identifier, a computed value…).
+function parseMethodsArray(value: string): string[] | null {
+  const v = value.trim();
+  if (!v.startsWith("[")) return null;
+  const inner = balanced(v, 0);
+  const parts = splitMembersFlat(inner);
+  const out: string[] = [];
+  for (const p of parts) {
+    const lit = stringLiteral(p);
+    if (lit == null) return null; // non-literal element → give up (don't guess)
+    out.push(lit.toUpperCase());
+  }
+  return out.length ? out : null;
+}
+
+// Split a bracketed list body on top-level commas (nested brackets/quotes aware).
+// Simpler than splitMembers (no `key:` parsing) — used for `methods: [...]`.
+function splitMembersFlat(body: string): string[] {
+  const out: string[] = [];
+  let depth = 0;
+  let quote = "";
+  let start = 0;
+  for (let i = 0; i < body.length; i++) {
+    const ch = body[i];
+    if (quote) {
+      if (ch === quote) quote = "";
+      continue;
+    }
+    if (ch === "'" || ch === '"' || ch === "`") quote = ch;
+    else if (ch === "{" || ch === "[" || ch === "(") depth++;
+    else if (ch === "}" || ch === "]" || ch === ")") depth--;
+    else if (ch === "," && depth === 0) {
+      const seg = body.slice(start, i).trim();
+      if (seg) out.push(seg);
+      start = i + 1;
+    }
+  }
+  const tail = body.slice(start).trim();
+  if (tail) out.push(tail);
+  return out;
+}
+
+export function parseFunctionHandlers(text: string): RayfinFunctionHandler[] {
+  const src = text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
+  const out: RayfinFunctionHandler[] = [];
+  const seen = new Set<string>();
+  for (const m of src.matchAll(/app\.http\(\s*(['"`])([^'"`]+)\1\s*(,?)/g)) {
+    const name = m[2];
+    if (seen.has(name)) continue;
+    seen.add(name);
+    let route: string | null = null;
+    let routeDynamic = false;
+    let methods: string[] | null = null;
+    if (m[3] === "," && m.index != null) {
+      // The options object is the next `{` before the call's closing `)`.
+      const after = m.index + m[0].length;
+      const braceIdx = src.indexOf("{", after);
+      const closeIdx = src.indexOf(")", after);
+      if (braceIdx !== -1 && (closeIdx === -1 || braceIdx < closeIdx)) {
+        for (const opt of splitMembers(balanced(src, braceIdx))) {
+          if (opt.key === "route") {
+            const r = stringLiteral(opt.value);
+            // A non-literal route (template/expression) is unresolvable. A static
+            // literal that carries Azure route params/wildcards (`{id}`, `*`) is
+            // *also* unresolvable to a concrete invoke path — treat both as dynamic
+            // so the UI warns and the URL falls back to the function name rather
+            // than silently posting to the wrong endpoint.
+            if (r == null || /[{}*]/.test(r)) routeDynamic = true;
+            else route = r;
+          } else if (opt.key === "methods") {
+            methods = parseMethodsArray(opt.value);
+          }
+        }
+      }
+    }
+    out.push({ name, route, routeDynamic, methods });
+  }
+  return out;
 }
 
 // Top-level files in `dir` with the given extension, sorted for determinism.
@@ -719,8 +903,6 @@ const ALLOWED_COMMANDS: ReadonlySet<string> = new Set([
   "up",
   "up status",
   "up db apply",
-  "functions typegen",
-  "connector list",
   "init ai-files install",
 ]);
 
@@ -740,6 +922,122 @@ export function validateRayfinArgs(args: unknown): string[] | null {
 // Build argv to run the project-local `rayfin` binary via the detected PM.
 export function rayfinArgv(pm: PackageManager, args: string[]): string[] {
   return exec(pm, ["rayfin", ...args]);
+}
+
+// ---- Local function invoke (dev backend) ----------------------------------
+
+const LOCAL_HOSTS: ReadonlySet<string> = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
+
+// The functions-host base URL may only carry a **shallow** path: empty, `/`, or a
+// single route-prefix segment (e.g. `/api`, `/api/`). This keeps the same-origin
+// preview proxy from repurposing the invoke/status endpoints to read arbitrary
+// *deep* paths of unrelated local services — the reachable surface stays
+// `http://127.0.0.1:<port>/<prefix?>/<known-function>`. (Liveness probing of a
+// localhost port is an inherent property of a user-configurable host field and is
+// not something this can fully eliminate.)
+const LOCAL_BASE_PATH = /^\/?[A-Za-z0-9_-]*\/?$/;
+
+// Build the POST URL for locally invoking a function, or null when the base URL
+// isn't a valid **localhost** http(s) URL or the name isn't a bare identifier.
+// The localhost restriction matters because /api/rayfin/* is reachable from the
+// same-origin preview proxy: it stops the invoke endpoint being turned into an
+// SSRF vector against arbitrary hosts. Deployed/auth'd invocation is out of scope
+// — this targets the local Azure Functions host (default 127.0.0.1:7071/api).
+//
+// `route` is the handler's statically-parsed `route:` (when present): a param-
+// free, injection-safe relative route is used as the path segment; anything with
+// `{params}`, `..`, or unexpected characters falls back to the function name (the
+// default route) so the POST still targets a plausible endpoint — the UI flags
+// such cases "verify".
+export function resolveFunctionInvokeUrl(
+  baseUrl: string,
+  name: string,
+  route: string | null = null,
+): string | null {
+  if (!/^[A-Za-z_$][\w$]*$/.test(name)) return null;
+  let u: URL;
+  try {
+    u = new URL(baseUrl);
+  } catch {
+    return null;
+  }
+  if (u.protocol !== "http:" && u.protocol !== "https:") return null;
+  if (!LOCAL_HOSTS.has(u.hostname)) return null;
+  // Reject userinfo (`user:pass@host`) and any query/fragment: they serve no
+  // purpose for a local function POST and only widen the request-shaping surface
+  // of an endpoint reachable from the same-origin preview proxy.
+  if (u.username || u.password || u.search || u.hash) return null;
+  // Only a shallow route-prefix path is allowed (see LOCAL_BASE_PATH).
+  if (!LOCAL_BASE_PATH.test(u.pathname)) return null;
+  return `${u.href.replace(/\/+$/, "")}/${resolveFunctionPathSegment(name, route)}`;
+}
+
+// The path segment appended to the base URL for a function: the handler's static
+// route when it's a safe, param-free relative path, else the function name (the
+// default route). Kept in sync with the client's transparency display.
+export function resolveFunctionPathSegment(name: string, route: string | null): string {
+  if (route != null) {
+    const r = route.replace(/^\/+/, "").replace(/\/+$/, "");
+    if (r && /^[A-Za-z0-9][A-Za-z0-9/_-]*$/.test(r) && !r.includes("..")) return r;
+  }
+  return name;
+}
+
+// Resolve the localhost origin (`scheme://host:port`) of a functions-host base
+// URL, or null when it isn't a localhost http(s) URL with a shallow path. Used by
+// the server-side reachability probe (a passive GET against the origin).
+export function resolveFunctionsHostOrigin(baseUrl: string): string | null {
+  let u: URL;
+  try {
+    u = new URL(baseUrl);
+  } catch {
+    return null;
+  }
+  if (u.protocol !== "http:" && u.protocol !== "https:") return null;
+  if (!LOCAL_HOSTS.has(u.hostname)) return null;
+  if (u.username || u.password || u.search || u.hash) return null;
+  if (!LOCAL_BASE_PATH.test(u.pathname)) return null;
+  return u.origin;
+}
+
+// Build argv to start the local Rayfin functions host — `rayfin dev functions
+// apply` (the runnable leaf; the bare `rayfin dev functions` only prints usage).
+// `apply` verifies Azure Functions Core Tools prerequisites (with consent) then
+// starts the local Rayfin functions runtime against the active deployment. Run as
+// a managed persistent process, gated by `hasLocalRayfinBin` + `hasFuncBin`
+// preflights so the Core-Tools prerequisite is already satisfied; the leading
+// `-y` auto-accepts any residual confirmation so the non-interactive lane can't
+// hang on a prompt.
+export function rayfinDevFunctionsArgv(pm: PackageManager): string[] {
+  return rayfinArgv(pm, ["-y", "dev", "functions", "apply"]);
+}
+
+// Whether the Azure Functions Core Tools `func` binary is available — a global
+// PATH tool, or a project-local install (`azure-functions-core-tools` exposes a
+// `func` bin). Gates the "Start functions host" button: without it, starting the
+// host would prompt to install Core Tools and stall. Cross-platform.
+export function hasFuncBin(cwd: string, env: NodeJS.ProcessEnv = process.env): boolean {
+  const names =
+    process.platform === "win32" ? ["func.exe", "func.cmd", "func.bat", "func"] : ["func"];
+  const pathVar = env.PATH || env.Path || "";
+  for (const dir of pathVar.split(path.delimiter)) {
+    if (!dir) continue;
+    for (const n of names) {
+      if (existsSyncSafe(path.join(dir, n))) return true;
+    }
+  }
+  // Fall back to a walk of node_modules/.bin (hoisted monorepo installs too).
+  let dir = path.resolve(cwd);
+  for (let i = 0; i < 8; i++) {
+    const bin = path.join(dir, "node_modules", ".bin");
+    for (const n of names) {
+      if (existsSyncSafe(path.join(bin, n))) return true;
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return false;
 }
 
 // Build argv to ask the CLI whether the user is signed in (`rayfin login status`).

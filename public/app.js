@@ -119,6 +119,31 @@ function toast(message) {
   toastTimer = setTimeout(() => el.classList.add("hidden"), 3200);
 }
 
+// Copy text to the clipboard. The canvas runs over loopback http (not a secure
+// context), so navigator.clipboard may be unavailable — fall back to a hidden
+// textarea + execCommand. Best-effort; never throws.
+function copyText(text) {
+  try {
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(text).catch(() => execCopy(text));
+      return;
+    }
+  } catch {}
+  execCopy(text);
+}
+function execCopy(text) {
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand("copy");
+    document.body.removeChild(ta);
+  } catch {}
+}
+
 // ---- Theme ----------------------------------------------------------------
 // The host doesn't expose its in-app theme, so we follow the OS appearance
 // (prefers-color-scheme) by default and let the user force light/dark from the
@@ -786,6 +811,42 @@ function rfEntityDetail(e) {
 // ---- Fabric workspace switcher (custom dropdown, mirrors the project selector) ----
 let rayfinDeployments = [];
 
+// ---- Rayfin functions panel (master-detail invoke workbench) ---------------
+// Base URL for the local Azure Functions host, kept in-memory (survives
+// re-renders; the input is the source of truth once the user edits it).
+let rfFnBaseUrl = "http://127.0.0.1:7071/api";
+// Selected function name (the detail workbench target), current search filter,
+// and the "only issues" toggle.
+let rfFnSelected = null;
+let rfFnFilter = "";
+let rfFnIssuesOnly = false;
+// Durable draft cache: name → { text, sig }. Survives background rayfin:state
+// broadcasts and selection switches; on a contract (sig) change the draft is
+// marked stale rather than silently reused. Cleared on project switch.
+const rfFnDrafts = new Map();
+// Last response per function name: name → { ok, status, ms, body, error, url,
+// method }. Kept so switching away and back doesn't lose the result.
+const rfFnResponses = new Map();
+// Monotonic request sequence + the latest request id per function, for in-flight
+// isolation (a late/superseded response can't land under the wrong function).
+let rfFnReqSeq = 0;
+const rfFnReqByName = new Map();
+// Pretty (indented) vs raw (compact) response rendering; user-toggled per panel.
+let rfFnPretty = true;
+// Client-side project generation, bumped on project switch, used to scope drafts.
+let rfFnGen = 0;
+// One-shot guard so the host reachability status is primed once per project when
+// the Functions section first becomes visible (mirrors the Rayfin update check).
+let rfFnHostChecked = false;
+// data-key of the currently-mounted detail pane, so background re-renders don't
+// remount (and wipe) the active editor unless the selection/contract changed.
+let rfFnDetailKey = "";
+// Identity of the editor that is actually mounted right now. saveActiveDraft()
+// stores the outgoing text under the signature it was *mounted* with (not the
+// live one), so a contract change is correctly detected as stale on remount.
+let rfFnMountedName = null;
+let rfFnMountedSig = null;
+
 function renderRayfinSwitch() {
   const toggle = $("#rf-switch-toggle");
   const name = $("#rf-switch-name");
@@ -1036,6 +1097,23 @@ function resetRayfinTransient() {
   rayfinDeployments = [];
   rfEntities = [];
   rfSelectedEntity = null;
+  // Functions workbench: drop drafts/responses/selection so the previous
+  // project's state can't bleed into the newly-focused one.
+  rfFnGen++;
+  rfFnSelected = null;
+  rfFnFilter = "";
+  rfFnIssuesOnly = false;
+  rfFnDrafts.clear();
+  rfFnResponses.clear();
+  rfFnReqByName.clear();
+  rfFnDetailKey = "";
+  rfFnMountedName = null;
+  rfFnMountedSig = null;
+  rfFnHostChecked = false;
+  const search = $("#rf-fn-search");
+  if (search) search.value = "";
+  const issues = $("#rf-fn-issues");
+  if (issues) issues.checked = false;
   if (rfCytoscape) {
     rfCytoscape.destroy();
     rfCytoscape = null;
@@ -1414,18 +1492,26 @@ function renderRayfin() {
   const r = state.rayfin;
   if (!r || r.detected === false) {
     $("#rf-app-name").textContent = "Rayfin";
-    for (const id of ["#rf-env", "#rf-workspace", "#rf-functions", "#rf-docs"]) {
+    for (const id of ["#rf-env", "#rf-workspace", "#rf-docs"]) {
       const el = $(id);
       if (el) el.innerHTML = '<div class="rf-empty">Loading…</div>';
     }
-    // #rf-model is a structural container (segmented toggle + list/graph panes),
-    // so only replace the list pane's content — wiping #rf-model would destroy
-    // the children renderRayfinModel() needs and leave the section stuck loading.
+    // #rf-model and #rf-functions are structural containers (segmented toggle +
+    // list/graph panes; two-pane list/detail), so only replace their inner list
+    // pane's content — wiping the container would destroy the children that
+    // renderRayfinModel()/renderRayfinFnList()/renderRayfinFnDetail() look up (they
+    // early-return on a null element), leaving the section stuck on "Loading…".
     resetRayfinTransient();
     renderRayfinVersion(null);
     const ml = $("#rf-model-list");
     if (ml) ml.innerHTML = '<div class="rf-empty">Loading…</div>';
     $("#rf-model-count")?.classList.add("hidden");
+    const fl = $("#rf-fn-list");
+    if (fl) fl.innerHTML = '<div class="rf-empty">Loading…</div>';
+    const fd = $("#rf-fn-detail");
+    if (fd) fd.innerHTML = "";
+    $("#rf-fn-count")?.classList.add("hidden");
+    rfFnDetailKey = "";
     return;
   }
 
@@ -1505,26 +1591,11 @@ function renderRayfin() {
   } else count.classList.add("hidden");
   renderRayfinModel();
 
-  // Functions & connectors — gated on support. Functions/connectors aren't
-  // backed by the current (stable or experimental) Rayfin CLI yet, so only show
-  // the section when the project actually declares/ships them: `functions`
-  // enabled in rayfin.yml, or a real functions/connectors directory present.
-  const fns = r.functions || [];
-  const conns = r.connectors || [];
-  const functionsSupported =
-    r.config?.functionsEnabled === true || fns.length > 0 || conns.length > 0;
-  $("#rf-functions-section")?.classList.toggle("hidden", !functionsSupported);
-  if (functionsSupported) {
-    const fnHtml = fns.length
-      ? fns.map((f) => `<span class="rf-tag">${esc(f)}</span>`).join("")
-      : '<span class="rf-muted">No functions</span>';
-    const connHtml = conns.length
-      ? conns.map((c) => `<span class="rf-tag">${esc(c)}</span>`).join("")
-      : '<span class="rf-muted">No connectors</span>';
-    $("#rf-functions").innerHTML =
-      `<div class="rf-kv"><span>Functions</span><div class="rf-tags">${fnHtml}</div></div>
-    <div class="rf-kv"><span>Connectors</span><div class="rf-tags">${connHtml}</div></div>`;
-  }
+  // Functions — gated on support. Functions aren't backed by the current (stable
+  // or experimental) Rayfin CLI verbs, so only show the section when the project
+  // actually declares/ships them: `functions` enabled in rayfin.yml, or a real
+  // functions schema/dir present.
+  renderRayfinFunctions();
 
   // Docs & agent setup
   const agentMsg = r.hasAgentFiles
@@ -1540,9 +1611,539 @@ function renderRayfin() {
     <div class="rf-links rf-docs-links">${links}</div>`;
 }
 
-// Render the installed Rayfin version chip + the "update available" affordance in
-// the header. The installed version is read offline (sync); the latest/update
-// fields come from a throttled, non-fatal npm-registry check the controller owns.
+// ---- Functions panel: master-detail invoke workbench -----------------------
+
+// Empty placeholder value for a param type (skeleton — the shape, no values).
+function rfFnPlaceholder(type) {
+  const t = (type || "").trim().toLowerCase();
+  if (t === "number" || t === "bigint") return 0;
+  if (t === "boolean") return false;
+  if (t.endsWith("[]") || t.startsWith("array<")) return [];
+  if (t === "string") return "";
+  if (t.startsWith("{")) return {};
+  return null;
+}
+
+// A non-empty *sample* value for a param type — handier to actually invoke with.
+function rfFnSampleValue(type) {
+  const t = (type || "").trim().toLowerCase();
+  if (t === "number" || t === "bigint") return 1;
+  if (t === "boolean") return true;
+  if (t.endsWith("[]") || t.startsWith("array<")) return [];
+  if (t === "string") return "example";
+  if (t.startsWith("{")) return {};
+  return null;
+}
+
+// Whether a function's inputs are representable as a top-level object of named
+// params. Empty/void/positional/unknown shapes → raw JSON only.
+function rfFnHasNamedParams(fn) {
+  return !!(fn && Array.isArray(fn.params) && fn.params.length);
+}
+
+// Build a JSON body from parsed params. `sample` fills example values.
+function rfFnBody(fn, sample) {
+  const obj = {};
+  for (const p of (fn && fn.params) || [])
+    obj[p.name] = sample ? rfFnSampleValue(p.type) : rfFnPlaceholder(p.type);
+  return JSON.stringify(obj, null, 2);
+}
+
+// Human-readable signature: `(a: number, b?: string) → output`.
+function rfFnSignature(fn) {
+  if (!fn) return "";
+  const params = (fn.params || [])
+    .map((p) => `${esc(p.name)}${p.optional ? "?" : ""}: <i>${esc(p.type)}</i>`)
+    .join(", ");
+  const out = fn.output ? ` → <i>${esc(fn.output)}</i>` : "";
+  return `<span class="rf-fn-sig">(${params})${out}</span>`;
+}
+
+// Path segment for a function's local invoke URL: the handler's safe static
+// route, else the function name (default route). Mirrors the server's
+// resolveFunctionPathSegment so the displayed URL matches what's invoked.
+function rfFnPathSegment(name, handler) {
+  if (handler && !handler.routeDynamic && handler.route) {
+    const r = handler.route.replace(/^\/+/, "").replace(/\/+$/, "");
+    if (r && /^[A-Za-z0-9][A-Za-z0-9/_-]*$/.test(r) && !r.includes("..")) return r;
+  }
+  return name;
+}
+function rfFnResolvedUrl(name, handler) {
+  const base = (rfFnBaseUrl || "").replace(/\/+$/, "");
+  return `${base}/${rfFnPathSegment(name, handler)}`;
+}
+
+// Declared HTTP methods for a handler (Azure v4 default = GET+POST when absent).
+function rfFnMethods(handler) {
+  if (handler && Array.isArray(handler.methods) && handler.methods.length) return handler.methods;
+  return ["GET", "POST"];
+}
+
+// Unified, ordered entry list: schema functions first (with their handler), then
+// orphan handlers (an app.http registration with no schema entry). `kind` drives
+// the status dot + the "issue" classification (anything but "ok" is an issue).
+function rfFnEntries() {
+  const r = state.rayfin || {};
+  const fns = r.functions || [];
+  const orphans = r.orphanHandlers || [];
+  const handlers = r.handlers || [];
+  const byName = new Map(handlers.map((h) => [h.name, h]));
+  const entries = fns.map((fn) => ({
+    name: fn.name,
+    kind: fn.hasHandler ? "ok" : "nohandler",
+    fn,
+    handler: byName.get(fn.name) || null,
+  }));
+  for (const name of orphans)
+    entries.push({ name, kind: "orphan", fn: null, handler: byName.get(name) || null });
+  return entries;
+}
+
+function rfFnFiltered(entries) {
+  const q = rfFnFilter.trim().toLowerCase();
+  return entries.filter((e) => {
+    if (rfFnIssuesOnly && e.kind === "ok") return false;
+    if (q && !e.name.toLowerCase().includes(q)) return false;
+    return true;
+  });
+}
+
+// Contract signature — a change (params/output/handler/route/methods) marks a
+// saved draft stale (keep + let the user reset, never silently reuse).
+function rfFnContractSig(entry) {
+  return JSON.stringify({
+    p: entry.fn?.params || null,
+    o: entry.fn?.output || null,
+    h: entry.fn?.hasHandler ?? null,
+    r: entry.handler?.route ?? null,
+    d: entry.handler?.routeDynamic ?? null,
+    m: entry.handler?.methods ?? null,
+  });
+}
+
+// Top-level Functions render: gating + shared inputs, then the durable list /
+// detail / host-pill sub-renders (each safe on a background broadcast).
+function renderRayfinFunctions() {
+  const r = state.rayfin || {};
+  const fns = r.functions || [];
+  const orphans = r.orphanHandlers || [];
+  const supported = r.config?.functionsEnabled === true || fns.length > 0 || orphans.length > 0;
+  $("#rf-functions-section")?.classList.toggle("hidden", !supported);
+  const base = $("#rf-fn-base");
+  if (base && !base.value) base.value = rfFnBaseUrl;
+  if (!supported) {
+    rfFnDetailKey = "";
+    return;
+  }
+  const entries = rfFnEntries();
+  // The "Only issues" filter is only meaningful when something needs attention
+  // (a no-handler function or an orphan handler). In a healthy project it would
+  // match nothing and read as broken, so hide it — and force it off so a stale
+  // checked state can't hide the whole (now healthy) list.
+  const hasIssues = entries.some((e) => e.kind !== "ok");
+  const issuesWrap = $("#rf-fn-issues-wrap");
+  if (issuesWrap) issuesWrap.classList.toggle("hidden", !hasIssues);
+  if (!hasIssues && rfFnIssuesOnly) {
+    rfFnIssuesOnly = false;
+    const box = $("#rf-fn-issues");
+    if (box) box.checked = false;
+  }
+  // Keep the current selection if it still exists; else pick the first visible
+  // (or first overall) entry — never a silent jump across a filter.
+  if (!rfFnSelected || !entries.some((e) => e.name === rfFnSelected)) {
+    const filtered = rfFnFiltered(entries);
+    rfFnSelected = (filtered[0] || entries[0] || {}).name || null;
+  }
+  const count = $("#rf-fn-count");
+  if (count) {
+    count.textContent = `${entries.length} ${entries.length === 1 ? "function" : "functions"}`;
+    count.classList.remove("hidden");
+  }
+  renderRayfinFnList();
+  renderRayfinFnDetail();
+  renderRayfinFnHost();
+  // Prime the host reachability once per project when the section first shows.
+  if (!rfFnHostChecked) {
+    rfFnHostChecked = true;
+    refreshRayfinFnHost();
+  }
+}
+
+function renderRayfinFnList() {
+  const listEl = $("#rf-fn-list");
+  if (!listEl) return;
+  const entries = rfFnEntries();
+  if (!entries.length) {
+    listEl.innerHTML = `<div class="rf-empty">No functions declared in this project.</div>`;
+    return;
+  }
+  const filtered = rfFnFiltered(entries);
+  if (!filtered.length) {
+    listEl.innerHTML = `<div class="rf-empty">No functions match the filter.</div>`;
+    return;
+  }
+  listEl.innerHTML = filtered
+    .map((e) => {
+      const active = e.name === rfFnSelected;
+      const dot = e.kind === "ok" ? "ok" : e.kind === "nohandler" ? "warn" : "orphan";
+      const pcount = (e.fn?.params || []).length;
+      const meta =
+        e.kind === "orphan"
+          ? "orphan handler"
+          : `${pcount} ${pcount === 1 ? "param" : "params"}${e.fn?.hasHandler ? "" : " · no handler"}`;
+      return `<button type="button" class="rf-fn-row${active ? " active" : ""}" role="option" aria-selected="${active}" data-fn="${esc(e.name)}" title="${esc(e.name)}">
+        <span class="rf-dot ${dot}" aria-hidden="true"></span>
+        <span class="rf-row-name">${esc(e.name)}</span>
+        <span class="rf-row-meta">${esc(meta)}</span>
+      </button>`;
+    })
+    .join("");
+}
+
+// Build/refresh the detail workbench. Only remounts (wiping the editor) when the
+// selection or the selected function's contract changes — background broadcasts
+// leave the active editor + response untouched.
+function renderRayfinFnDetail() {
+  const detailEl = $("#rf-fn-detail");
+  if (!detailEl) return;
+  const entries = rfFnEntries();
+  const entry = entries.find((e) => e.name === rfFnSelected) || null;
+
+  if (!entry) {
+    if (rfFnDetailKey !== "__none__") {
+      detailEl.innerHTML = `<div class="rf-empty">Select a function to invoke it.</div>`;
+      rfFnDetailKey = "__none__";
+    }
+    rfFnMountedName = null;
+    rfFnMountedSig = null;
+    return;
+  }
+
+  const filtered = rfFnFiltered(entries);
+  const hidden = !filtered.some((e) => e.name === entry.name);
+  const sig = rfFnContractSig(entry);
+  const key = hidden ? `__hidden__:${entry.name}` : `${rfFnGen}::${entry.name}::${sig}`;
+  if (key === rfFnDetailKey) return;
+  // Persist the outgoing editor's text before we replace it.
+  saveActiveDraft();
+  rfFnDetailKey = key;
+
+  if (hidden) {
+    detailEl.innerHTML = `<div class="rf-fn-hidden">
+      <p><code>${esc(entry.name)}</code> is selected but hidden by the current filter.</p>
+      <button type="button" class="lane-btn" id="rf-fn-clearfilter">Clear filter</button>
+    </div>`;
+    rfFnMountedName = null;
+    rfFnMountedSig = null;
+    return;
+  }
+
+  detailEl.innerHTML = rfFnDetailHtml(entry, sig);
+  rfFnMountedName = entry.name;
+  rfFnMountedSig = sig;
+  renderRayfinFnResponse(entry.name);
+}
+
+function rfFnDetailHtml(entry, sig) {
+  const { name, kind, fn, handler } = entry;
+  const badge =
+    kind === "ok"
+      ? '<span class="rf-fn-handler ok"><svg class="oi" aria-hidden="true"><use href="#oct-check" /></svg>handler</span>'
+      : kind === "nohandler"
+        ? '<span class="rf-fn-handler warn"><svg class="oi" aria-hidden="true"><use href="#oct-alert" /></svg>no handler</span>'
+        : '<span class="rf-fn-handler muted"><svg class="oi" aria-hidden="true"><use href="#oct-alert" /></svg>orphan</span>';
+
+  const url = rfFnResolvedUrl(name, handler);
+  const routeWarn = handler?.routeDynamic
+    ? '<span class="rf-fn-note warn">route unknown — verify</span>'
+    : "";
+  const methods = rfFnMethods(handler);
+  const postWarn = methods.includes("POST")
+    ? ""
+    : `<span class="rf-fn-note warn">declared methods (${esc(methods.join(", "))}) don't include POST</span>`;
+
+  const draft = rfFnDrafts.get(name);
+  const staleDraft = !!draft && draft.sig !== sig;
+  const initial = draft ? draft.text : rfFnBody(fn, true);
+  const rows = Math.min(14, Math.max(3, initial.split("\n").length));
+  const shapeNote = !fn
+    ? '<span class="rf-fn-note">no schema — raw JSON</span>'
+    : !rfFnHasNamedParams(fn)
+      ? '<span class="rf-fn-note">void/complex input — raw JSON only</span>'
+      : "";
+
+  const staleBanner = staleDraft
+    ? `<div class="rf-fn-stale">
+        <svg class="oi" aria-hidden="true"><use href="#oct-alert" /></svg>
+        The function contract changed since you last edited this input.
+        <button type="button" class="lane-btn task" data-fn-reset="${esc(name)}">Reset</button>
+      </div>`
+    : "";
+
+  const noHandler = kind === "nohandler";
+
+  return `<div class="rf-fn-detail-head">
+      <code class="rf-fn-name">${esc(name)}</code>
+      ${rfFnSignature(fn)}
+      <span class="grow"></span>
+      ${badge}
+    </div>
+    <div class="rf-fn-req">
+      <span class="rf-fn-method">POST</span>
+      <code class="rf-fn-url" title="${esc(url)}">${esc(url)}</code>
+      <button type="button" class="icon-btn" data-fn-copyurl="${esc(url)}" title="Copy URL">
+        <svg class="oi" aria-hidden="true"><use href="#oct-copy" /></svg>
+      </button>
+    </div>
+    <div class="rf-fn-req-notes">
+      <span class="rf-fn-note">local HTTP invocation</span>${routeWarn}${postWarn}${shapeNote}
+    </div>
+    ${staleBanner}
+    <div class="rf-fn-editor-head">
+      <label class="rf-fn-label" for="rf-fn-input">Request body (JSON)</label>
+      <span class="grow"></span>
+      <button type="button" class="lane-btn task" data-fn-sample="${esc(name)}">Fill sample</button>
+      <button type="button" class="lane-btn task" data-fn-skeleton="${esc(name)}">Reset to skeleton</button>
+    </div>
+    <textarea id="rf-fn-input" class="rf-fn-input" spellcheck="false"
+      autocapitalize="off" autocomplete="off" rows="${rows}"
+      data-fn="${esc(name)}">${esc(initial)}</textarea>
+    <div class="rf-fn-actions">
+      <button type="button" class="lane-btn primary rf-fn-invoke" data-fn="${esc(name)}"${noHandler ? " data-nohandler disabled" : ""}>
+        <svg class="oi" aria-hidden="true"><use href="#oct-play" /></svg>Invoke
+      </button>
+      ${noHandler ? `<button type="button" class="lane-btn task" data-fn-force="${esc(name)}">Invoke anyway</button>` : ""}
+      <span class="rf-fn-status" aria-live="polite"></span>
+    </div>
+    ${
+      noHandler
+        ? '<div class="rf-fn-note warn">This function has no handler — invoking will likely 404 until one is implemented.</div>'
+        : ""
+    }
+    <div class="rf-fn-resp hidden">
+      <div class="rf-fn-resp-head">
+        <span class="rf-fn-resp-label">Response</span>
+        <span class="grow"></span>
+        <!-- biome-ignore lint/a11y/useSemanticElements: styled segmented button group -->
+        <div class="segmented rf-fn-fmt" role="group" aria-label="Response format">
+          <button type="button" data-fmt="pretty" class="${rfFnPretty ? "on" : ""}">Pretty</button>
+          <button type="button" data-fmt="raw" class="${rfFnPretty ? "" : "on"}">Raw</button>
+        </div>
+        <button type="button" class="icon-btn rf-fn-copy" title="Copy response">
+          <svg class="oi" aria-hidden="true"><use href="#oct-copy" /></svg>
+        </button>
+      </div>
+      <pre class="rf-fn-response"></pre>
+    </div>`;
+}
+
+// Persist the currently-mounted editor's text into the draft cache, keyed by the
+// signature it was *mounted* with (rfFnMountedSig) — never the live contract — so
+// a since-arrived contract change is still detected as stale on the next remount.
+function saveActiveDraft() {
+  const ta = $("#rf-fn-input");
+  if (!ta || !rfFnMountedName) return;
+  rfFnDrafts.set(rfFnMountedName, { text: ta.value, sig: rfFnMountedSig });
+}
+
+function selectRayfinFn(name) {
+  if (!name || name === rfFnSelected) return;
+  rfFnSelected = name;
+  renderRayfinFnList();
+  renderRayfinFnDetail();
+}
+
+// Format a response body for display. Pretty = 2-space indent; raw = compact.
+function rfFnFormatBody(body) {
+  if (typeof body === "string") return body;
+  try {
+    return JSON.stringify(body, null, rfFnPretty ? 2 : 0);
+  } catch {
+    return String(body);
+  }
+}
+
+const RF_FN_MAX_BODY = 20000;
+
+function renderRayfinFnResponse(name) {
+  const d = $("#rf-fn-detail");
+  if (!d) return;
+  const res = rfFnResponses.get(name);
+  const wrap = d.querySelector(".rf-fn-resp");
+  const status = d.querySelector(".rf-fn-status");
+  const pre = d.querySelector(".rf-fn-response");
+  if (!res) {
+    wrap?.classList.add("hidden");
+    return;
+  }
+  if (status) {
+    if (res.ok === false) {
+      status.className = "rf-fn-status err";
+      const code = res.status != null ? `${res.status} · ` : "";
+      const ms = res.ms != null ? ` · ${res.ms}ms` : "";
+      status.textContent = `${code}${res.error || "Request failed"}${ms}`;
+    } else {
+      status.className = "rf-fn-status ok";
+      status.textContent = `${res.status} OK · ${res.ms}ms`;
+    }
+  }
+  if (res.body === undefined) {
+    wrap?.classList.add("hidden");
+    return;
+  }
+  if (pre && wrap) {
+    const full = rfFnFormatBody(res.body);
+    pre.textContent =
+      full.length > RF_FN_MAX_BODY
+        ? `${full.slice(0, RF_FN_MAX_BODY)}\n… (truncated ${full.length - RF_FN_MAX_BODY} more chars — use Copy for the full response)`
+        : full;
+    wrap.classList.remove("hidden");
+  }
+}
+
+// Invoke the selected function: validate JSON, POST to the local host, render
+// status + body. In-flight isolation guarantees a late/superseded response can't
+// land under the wrong function.
+async function invokeRayfinFn(name) {
+  const d = $("#rf-fn-detail");
+  const ta = $("#rf-fn-input");
+  const status = d?.querySelector(".rf-fn-status");
+  if (!ta || ta.dataset.fn !== name) return;
+  let payload;
+  try {
+    payload = ta.value.trim() ? JSON.parse(ta.value) : {};
+  } catch (err) {
+    if (status) {
+      status.className = "rf-fn-status err";
+      status.textContent = `Invalid JSON: ${err.message}`;
+    }
+    return;
+  }
+  saveActiveDraft();
+  const reqId = ++rfFnReqSeq;
+  rfFnReqByName.set(name, reqId);
+  if (status) {
+    status.className = "rf-fn-status";
+    status.textContent = "Invoking…";
+  }
+  const primary = d?.querySelector(".rf-fn-invoke");
+  const force = d?.querySelector("[data-fn-force]");
+  if (primary) primary.disabled = true;
+  if (force) force.disabled = true;
+  try {
+    const res = await api("/api/rayfin/functions/invoke", {
+      name,
+      input: payload,
+      baseUrl: rfFnBaseUrl,
+    });
+    // Ignore a superseded response (a newer invoke of this function started).
+    if (rfFnReqByName.get(name) !== reqId) return;
+    rfFnResponses.set(name, res || { ok: false, error: "Request failed" });
+    if (rfFnSelected === name) renderRayfinFnResponse(name);
+  } finally {
+    if (rfFnReqByName.get(name) === reqId && rfFnSelected === name) {
+      const dd = $("#rf-fn-detail");
+      const p = dd?.querySelector(".rf-fn-invoke");
+      const f = dd?.querySelector("[data-fn-force]");
+      if (p) p.disabled = p.hasAttribute("data-nohandler");
+      if (f) f.disabled = false;
+    }
+  }
+}
+
+// Set the request-body editor to a fresh sample / skeleton (and persist it).
+function rfFnFillBody(name, sample) {
+  const ta = $("#rf-fn-input");
+  if (!ta || ta.dataset.fn !== name) return;
+  const entry = rfFnEntries().find((e) => e.name === name);
+  ta.value = rfFnBody(entry?.fn || null, sample);
+  saveActiveDraft();
+}
+
+// ---- Functions panel: local host pill + managed start/stop -----------------
+
+function renderRayfinFnHost() {
+  const h = state.fnHost || {};
+  const running = h.status === "running";
+  const funcMissing = h.funcAvailable === false;
+  const start = $("#rf-fn-host-start");
+  const stop = $("#rf-fn-host-stop");
+  const pill = $("#rf-fn-pill");
+  const hint = $("#rf-fn-host-hint");
+  if (start) {
+    start.classList.toggle("hidden", running);
+    start.disabled = funcMissing;
+  }
+  if (stop) stop.classList.toggle("hidden", !running);
+  if (pill) {
+    const dot = pill.querySelector(".rf-dot");
+    const txt = pill.querySelector(".rf-fn-pill-text");
+    let cls = "rf-chip rf-fn-pill";
+    let dotCls = "rf-dot";
+    let label = "Host unknown";
+    if (running && h.reachable !== true) {
+      dotCls += " warn";
+      label = "Host starting…";
+    } else if (h.reachable === true) {
+      dotCls += " ok";
+      cls += " ok";
+      label = "Host reachable";
+    } else if (h.reachable === false) {
+      dotCls += " orphan";
+      label = "Host not reachable";
+    }
+    pill.className = cls;
+    if (dot) dot.className = dotCls;
+    if (txt) txt.textContent = label;
+  }
+  if (hint) {
+    if (funcMissing) {
+      hint.innerHTML = `Azure Functions Core Tools (<code>func</code>) isn't installed, so Cockpit.js can't start the local functions host. Install it, or start the host yourself. <a href="https://learn.microsoft.com/azure/azure-functions/functions-run-local" target="_blank" rel="noreferrer">Install guide ↗</a>`;
+      hint.classList.remove("hidden");
+    } else {
+      hint.classList.add("hidden");
+    }
+  }
+}
+
+async function refreshRayfinFnHost() {
+  const res = await api("/api/rayfin/functions/host/status", { baseUrl: rfFnBaseUrl });
+  if (res && typeof res === "object") {
+    state.fnHost = res;
+    renderRayfinFnHost();
+  }
+}
+
+// Poll host reachability a few times after Start so the pill flips to reachable
+// once `func start` has finished booting.
+function rfFnHostPoll(n) {
+  if (n > 12) return;
+  setTimeout(async () => {
+    await refreshRayfinFnHost();
+    if (state.fnHost?.reachable === true || state.fnHost?.status !== "running") return;
+    rfFnHostPoll(n + 1);
+  }, 1500);
+}
+
+async function startRayfinFnHost() {
+  const start = $("#rf-fn-host-start");
+  if (start) start.disabled = true;
+  const res = await api("/api/rayfin/functions/host/start", {});
+  if (res && res.ok === false) {
+    toast(res.reason || "Couldn't start the functions host.");
+    await refreshRayfinFnHost();
+    return;
+  }
+  await refreshRayfinFnHost();
+  rfFnHostPoll(0);
+}
+
+async function stopRayfinFnHost() {
+  await api("/api/rayfin/functions/host/stop", {});
+  await refreshRayfinFnHost();
+}
+
 // On first sight of an installed version we kick that check off once (the server
 // throttles + coalesces, and the result rides back on a `rayfin:state` event).
 let rayfinUpdateChecking = false;
@@ -2955,6 +3556,10 @@ function applyEvent(e) {
       state.rayfin = e.rayfin;
       renderRayfin();
       break;
+    case "rayfin:fnhost":
+      state.fnHost = e.fnHost;
+      renderRayfinFnHost();
+      break;
     case "projects":
       state.projects = e.projects;
       renderProjects();
@@ -3676,6 +4281,123 @@ $("#tab-rayfin").addEventListener("click", async (e) => {
   const r = await api("/api/rayfin/deploy", { workspace });
   if (r && r.started === false && r.reason) toast(r.reason);
 });
+
+// Functions panel: keep the shared base URL in sync as the user edits it (and
+// re-check host reachability + refresh the resolved URL shown in the detail).
+$("#rf-fn-base")?.addEventListener("input", (e) => {
+  rfFnBaseUrl = e.target.value.trim() || "http://127.0.0.1:7071/api";
+  // The resolved URL in the open detail depends on the base; force a remount.
+  rfFnDetailKey = "";
+  renderRayfinFnDetail();
+  clearTimeout(rfFnBaseDebounce);
+  rfFnBaseDebounce = setTimeout(() => refreshRayfinFnHost(), 500);
+});
+let rfFnBaseDebounce = 0;
+
+// Functions panel: search + "only issues" filter.
+$("#rf-fn-search")?.addEventListener("input", (e) => {
+  rfFnFilter = e.target.value || "";
+  renderRayfinFnList();
+  renderRayfinFnDetail();
+});
+$("#rf-fn-issues")?.addEventListener("change", (e) => {
+  rfFnIssuesOnly = !!e.target.checked;
+  renderRayfinFnList();
+  renderRayfinFnDetail();
+});
+
+// Functions panel: list selection (click) + keyboard nav scoped to the list.
+$("#rf-fn-list")?.addEventListener("click", (e) => {
+  const row = e.target.closest(".rf-fn-row");
+  if (row) selectRayfinFn(row.dataset.fn);
+});
+$("#rf-fn-list")?.addEventListener("keydown", (e) => {
+  if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+  const filtered = rfFnFiltered(rfFnEntries());
+  if (!filtered.length) return;
+  e.preventDefault();
+  const idx = filtered.findIndex((x) => x.name === rfFnSelected);
+  const next =
+    e.key === "ArrowDown" ? Math.min(filtered.length - 1, idx + 1) : Math.max(0, idx - 1);
+  selectRayfinFn(filtered[next].name);
+  $("#rf-fn-list").querySelector(".rf-fn-row.active")?.focus();
+});
+
+// Functions panel: detail workbench actions (event-delegated so they survive
+// remounts). Invoke, sample/skeleton fill, stale-draft reset, copy URL/response,
+// pretty/raw toggle, and the "clear filter" escape hatch.
+$("#rf-fn-detail")?.addEventListener("click", (e) => {
+  const t = e.target;
+  const invoke = t.closest(".rf-fn-invoke");
+  if (invoke && !invoke.disabled) return void invokeRayfinFn(invoke.dataset.fn);
+  const force = t.closest("[data-fn-force]");
+  if (force) return void invokeRayfinFn(force.getAttribute("data-fn-force"));
+  const sample = t.closest("[data-fn-sample]");
+  if (sample) return void rfFnFillBody(sample.getAttribute("data-fn-sample"), true);
+  const skeleton = t.closest("[data-fn-skeleton]");
+  if (skeleton) return void rfFnFillBody(skeleton.getAttribute("data-fn-skeleton"), false);
+  const reset = t.closest("[data-fn-reset]");
+  if (reset) {
+    // Discard the stale draft and remount to a fresh sample body. Null the mounted
+    // identity first so the forced remount's saveActiveDraft() is a no-op (else it
+    // would immediately re-save the text we're discarding).
+    rfFnDrafts.delete(reset.getAttribute("data-fn-reset"));
+    rfFnMountedName = null;
+    rfFnMountedSig = null;
+    rfFnDetailKey = "";
+    renderRayfinFnDetail();
+    return;
+  }
+  const copyUrl = t.closest("[data-fn-copyurl]");
+  if (copyUrl) {
+    copyText(copyUrl.getAttribute("data-fn-copyurl"));
+    toast("Copied URL.");
+    return;
+  }
+  if (t.closest(".rf-fn-copy")) {
+    const res = rfFnResponses.get(rfFnSelected);
+    if (res && res.body !== undefined) {
+      copyText(rfFnFormatBody(res.body));
+      toast("Copied response.");
+    }
+    return;
+  }
+  const fmt = t.closest(".rf-fn-fmt [data-fmt]");
+  if (fmt) {
+    rfFnPretty = fmt.getAttribute("data-fmt") === "pretty";
+    $("#rf-fn-detail")
+      ?.querySelectorAll(".rf-fn-fmt [data-fmt]")
+      .forEach((b) => {
+        b.classList.toggle("on", b.getAttribute("data-fmt") === fmt.getAttribute("data-fmt"));
+      });
+    renderRayfinFnResponse(rfFnSelected);
+    return;
+  }
+  if (t.closest("#rf-fn-clearfilter")) {
+    rfFnFilter = "";
+    rfFnIssuesOnly = false;
+    const s = $("#rf-fn-search");
+    if (s) s.value = "";
+    const i = $("#rf-fn-issues");
+    if (i) i.checked = false;
+    renderRayfinFnList();
+    renderRayfinFnDetail();
+  }
+});
+
+// Functions panel: Cmd/Ctrl+Enter in the request-body editor invokes.
+$("#rf-fn-detail")?.addEventListener("keydown", (e) => {
+  if (!(e.key === "Enter" && (e.metaKey || e.ctrlKey))) return;
+  const ta = e.target.closest(".rf-fn-input");
+  if (!ta) return;
+  e.preventDefault();
+  invokeRayfinFn(ta.dataset.fn);
+});
+
+// Functions panel: local host controls (pill re-check + managed start/stop).
+$("#rf-fn-pill")?.addEventListener("click", () => refreshRayfinFnHost());
+$("#rf-fn-host-start")?.addEventListener("click", () => startRayfinFnHost());
+$("#rf-fn-host-stop")?.addEventListener("click", () => stopRayfinFnHost());
 
 // "Start dev server": launches the project's dev server (the Preview tab's Dev
 // lane) and switches to Preview — same as clicking Start there. For a Rayfin app

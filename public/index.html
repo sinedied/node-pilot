@@ -69,6 +69,19 @@
           d="M8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0ZM1.5 8a6.5 6.5 0 1 0 13 0 6.5 6.5 0 0 0-13 0Zm4.879-2.773 4.264 2.559a.25.25 0 0 1 0 .428l-4.264 2.559A.25.25 0 0 1 6 10.559V5.442a.25.25 0 0 1 .379-.215Z"
         />
       </symbol>
+      <symbol id="oct-search" viewBox="0 0 16 16">
+        <path
+          d="M10.68 11.74a6 6 0 0 1-7.922-8.982 6 6 0 0 1 8.982 7.922l3.04 3.04a.749.749 0 0 1-.326 1.275.749.749 0 0 1-.734-.215ZM11.5 7a4.499 4.499 0 1 0-8.997 0A4.499 4.499 0 0 0 11.5 7Z"
+        />
+      </symbol>
+      <symbol id="oct-copy" viewBox="0 0 16 16">
+        <path
+          d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z"
+        />
+        <path
+          d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"
+        />
+      </symbol>
       <symbol id="oct-square-fill" viewBox="0 0 16 16">
         <path
           d="M5.75 4h4.5c.966 0 1.75.784 1.75 1.75v4.5A1.75 1.75 0 0 1 10.25 12h-4.5A1.75 1.75 0 0 1 4 10.25v-4.5C4 4.784 4.784 4 5.75 4Z"
@@ -687,17 +700,66 @@
           </div>
         </div>
 
-        <!-- Functions / connectors -->
+        <!-- Functions -->
         <div class="deps-section" id="rf-functions-section">
           <div class="deps-section-head wrap">
             <h3 class="deps-section-title">
-              <svg class="oi" aria-hidden="true"><use href="#oct-zap" /></svg>Functions &amp; connectors
+              <svg class="oi" aria-hidden="true"><use href="#oct-zap" /></svg>Functions
             </h3>
+            <span id="rf-fn-count" class="rf-chip muted hidden"></span>
             <span class="grow"></span>
-            <button type="button" class="lane-btn" data-rf-cli="functions typegen">Typegen</button>
-            <button type="button" class="lane-btn" data-rf-cli="connector list">Connectors</button>
+            <button
+              type="button"
+              id="rf-fn-pill"
+              class="rf-chip rf-fn-pill"
+              title="Reachability of the local functions host — click to re-check"
+            >
+              <span class="rf-dot" aria-hidden="true"></span><span class="rf-fn-pill-text">Host —</span>
+            </button>
+            <button type="button" id="rf-fn-host-start" class="lane-btn">
+              <svg class="oi" aria-hidden="true"><use href="#oct-play" /></svg>Start host
+            </button>
+            <button type="button" id="rf-fn-host-stop" class="lane-btn hidden">
+              <svg class="oi" aria-hidden="true"><use href="#oct-square-fill" /></svg>Stop host
+            </button>
           </div>
-          <div id="rf-functions" class="rf-functions"></div>
+          <div id="rf-fn-host-hint" class="rf-fn-host-hint hidden"></div>
+          <div class="deps-section-head wrap rf-fn-toolbar">
+            <label class="rf-fn-search" title="Filter functions by name">
+              <svg class="oi" aria-hidden="true"><use href="#oct-search" /></svg>
+              <input
+                type="text"
+                id="rf-fn-search"
+                class="rf-input"
+                spellcheck="false"
+                autocapitalize="off"
+                autocomplete="off"
+                placeholder="Search functions…"
+                aria-label="Search functions"
+              />
+            </label>
+            <label id="rf-fn-issues-wrap" class="rf-check" title="Show only functions that need attention (no handler / orphaned)">
+              <input type="checkbox" id="rf-fn-issues" /> Only issues
+            </label>
+            <span class="grow"></span>
+            <label class="rf-fn-host" title="Base URL of the local Azure Functions host used by Invoke">
+              <span>Host</span>
+              <input
+                type="text"
+                id="rf-fn-base"
+                class="rf-input"
+                spellcheck="false"
+                autocapitalize="off"
+                autocomplete="off"
+                placeholder="http://127.0.0.1:7071/api"
+                aria-label="Local functions host base URL"
+              />
+            </label>
+          </div>
+          <div id="rf-functions" class="rf-fn-2pane">
+            <div id="rf-fn-list" class="rf-fn-list" role="listbox" aria-label="Functions"></div>
+            <div id="rf-fn-detail" class="rf-fn-detail"></div>
+          </div>
         </div>
 
         <!-- Docs & agent setup -->

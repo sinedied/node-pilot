@@ -143,6 +143,46 @@ export interface RayfinEntity {
   permissions: RayfinPermission[];
 }
 
+// A single named input parameter of a Rayfin function, parsed from the
+// object-literal `input` of its `FunctionsSchema` entry.
+export interface RayfinFunctionParam {
+  name: string;
+  // Raw TypeScript type text (e.g. "string", "number", "Record<string, unknown>").
+  type: string;
+  optional: boolean;
+}
+
+// A Rayfin function: its typed contract (from functions/src/types.ts) plus
+// whether a matching `app.http(...)` handler is registered.
+export interface RayfinFunction {
+  name: string;
+  // Raw input type text ("{ … }" object literal, "void", or "" when unknown —
+  // e.g. the legacy per-subdirectory layout with no schema).
+  input: string;
+  // Raw output type text ("" when unknown).
+  output: string;
+  // Named params parsed from an object-literal input (empty for void / non-object
+  // inputs and the legacy layout).
+  params: RayfinFunctionParam[];
+  // A matching `app.http("<name>", …)` handler exists in functions/src/handlers.ts.
+  hasHandler: boolean;
+}
+
+// A parsed `app.http("<name>", { … })` registration from functions/src/handlers.ts,
+// with best-effort *static* route/method info. Used to attach the resolved local
+// invoke URL/method to schema functions and to render invokable orphan rows.
+export interface RayfinFunctionHandler {
+  name: string;
+  // Static literal `route:` value (may contain `{param}` segments), or null when
+  // the handler uses the default route (its name) or the route is non-literal.
+  route: string | null;
+  // True when a `route:` option is present but not a static string literal (so the
+  // effective route can't be resolved offline — the UI labels it "verify").
+  routeDynamic: boolean;
+  // Static literal HTTP methods (upper-cased), or null when defaulted/non-literal.
+  methods: string[] | null;
+}
+
 export interface RayfinConfig {
   name: string | null;
   version: string | null;
@@ -164,8 +204,12 @@ export interface RayfinState {
   auth: { signedIn: boolean | null };
   deployments: { active: string | null; list: RayfinDeployment[] };
   entities: RayfinEntity[];
-  functions: string[];
-  connectors: string[];
+  functions: RayfinFunction[];
+  // Handlers registered via `app.http(...)` that have no matching schema entry.
+  orphanHandlers: string[];
+  // Every parsed `app.http(...)` registration (schema-backed and orphan alike),
+  // carrying best-effort static route/method info for the invoke workbench.
+  handlers: RayfinFunctionHandler[];
   // Installed Rayfin CLI/SDK version + the (network) update check. `installed`
   // is a cheap sync read; the rest are filled by the controller's throttled,
   // non-fatal npm-registry check (latest=null / error=true when unknown).
@@ -388,6 +432,27 @@ export interface DevState {
   label?: string;
   _handle: ProcessHandle | null;
 }
+
+// Managed local Azure Functions host (Rayfin `dev functions`). Its process is
+// long-lived like the dev server; reachability is a separate passive probe so
+// the pill also reflects a host started outside Cockpit.
+export interface FunctionsHostState {
+  status: "stopped" | "running";
+  pid: number | null;
+  // Tri-state passive reachability of the configured base URL's origin: true
+  // (responded), false (refused/timed out), null (unknown / not yet probed / the
+  // base URL isn't a localhost URL).
+  reachable: boolean | null;
+  // Whether Azure Functions Core Tools (`func`) is available to start the host.
+  funcAvailable: boolean;
+  // The base URL reachability was last probed against.
+  baseUrl: string | null;
+  _handle: ProcessHandle | null;
+}
+
+// The `fnHost` shape as serialized into the state snapshot / SSE broadcasts (the
+// live `ProcessHandle` is stripped).
+export type FunctionsHostStatus = Omit<FunctionsHostState, "_handle"> & { _handle?: undefined };
 
 // ---- Debugger (CDP-backed) ------------------------------------------------
 

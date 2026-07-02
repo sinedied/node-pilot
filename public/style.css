@@ -416,7 +416,8 @@ body {
   box-shadow: 0 0 0 3px var(--focus-ring);
 }
 /* List rows show selection via .active (bg + inset bar); focus is a subtle bg, no ring. */
-.rf-entity-row:focus-visible {
+.rf-entity-row:focus-visible,
+.rf-fn-row:focus-visible {
   outline: none;
   background: var(--bg-inset);
 }
@@ -1870,6 +1871,361 @@ table.dep-table {
 }
 .rf-tag.role {
   color: var(--purple);
+}
+
+/* Functions panel: signature inspector + local invoker */
+.rf-functions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.rf-fn-host {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  font-size: 12px;
+  color: var(--dim);
+}
+.rf-fn-host .rf-input {
+  flex: 1 1 180px;
+  width: auto;
+  min-width: 0;
+  max-width: 260px;
+}
+/* Functions toolbar: search box + "Only issues" toggle. */
+.rf-fn-toolbar {
+  gap: 6px 12px;
+}
+.rf-fn-search {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 200px;
+  min-width: 0;
+  max-width: 340px;
+  color: var(--dim);
+}
+.rf-fn-search .oi {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+}
+.rf-fn-search .rf-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.rf-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--dim);
+  white-space: nowrap;
+}
+/* Reachability pill (a .rf-chip rendered as a <button> — click to re-check).
+   `.rf-chip` styles the border/radius/text but not the button chrome, so reset
+   the native UA appearance (WebKit otherwise paints a grey filled button) to keep
+   it a flat, no-fill chip; state color comes from the dot + `.rf-chip.ok`. */
+.rf-fn-pill {
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
+}
+.rf-fn-pill:hover {
+  background: var(--control-hover);
+}
+.rf-fn-pill:active {
+  background: var(--control-active);
+}
+.rf-fn-pill:focus-visible {
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+.rf-fn-pill .rf-dot {
+  margin-right: 1px;
+}
+.rf-fn-host-hint {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--dim);
+  padding: 7px 9px;
+  border: 1px solid color-mix(in srgb, var(--yellow) 40%, var(--border));
+  border-radius: var(--radius);
+}
+.rf-fn-host-hint code {
+  font-family: var(--mono);
+  color: var(--text);
+}
+.rf-fn-host-hint a {
+  color: var(--accent);
+}
+
+/* Master-detail invoke workbench (mirrors the data-model .rf-model-2pane). */
+.rf-fn-2pane {
+  display: grid;
+  grid-template-columns: minmax(160px, 260px) 1fr;
+  gap: 12px;
+  align-items: start;
+}
+.rf-fn-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 420px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 4px;
+  background: var(--bg-elev);
+}
+.rf-fn-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  border-radius: var(--radius);
+  padding: 5px 8px;
+  font: inherit;
+  white-space: nowrap;
+}
+.rf-fn-row:hover {
+  background: var(--control-hover);
+}
+.rf-fn-row.active {
+  background: color-mix(in srgb, var(--accent) 14%, var(--bg-elev));
+}
+/* Function status dots: green has-handler / yellow no-handler / grey orphan. */
+.rf-dot.ok {
+  background: var(--green);
+}
+.rf-dot.warn {
+  background: var(--yellow);
+}
+.rf-dot.orphan {
+  background: var(--dim);
+}
+.rf-fn-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 120px;
+  padding: 12px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.rf-fn-detail-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+.rf-fn-name {
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+.rf-fn-sig {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--dim);
+  word-break: break-word;
+}
+.rf-fn-sig i {
+  font-style: normal;
+  color: var(--accent);
+}
+.rf-fn-handler {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-size: 10px;
+  white-space: nowrap;
+}
+.rf-fn-handler .oi {
+  width: 12px;
+  height: 12px;
+}
+.rf-fn-handler.ok {
+  color: var(--green);
+  border-color: color-mix(in srgb, var(--green) 40%, var(--border));
+}
+.rf-fn-handler.warn {
+  color: var(--yellow);
+  border-color: color-mix(in srgb, var(--yellow) 40%, var(--border));
+}
+.rf-fn-handler.muted {
+  color: var(--dim);
+  border-color: var(--border);
+}
+/* Resolved request line: METHOD pill + monospace URL + copy button. */
+.rf-fn-req {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.rf-fn-method {
+  flex: 0 0 auto;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 999px;
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--border));
+}
+.rf-fn-url {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--dim);
+}
+.rf-fn-req-notes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+.rf-fn-note {
+  font-size: 11px;
+  color: var(--dim);
+}
+.rf-fn-note.warn {
+  color: var(--yellow);
+}
+.rf-fn-stale {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--yellow);
+  padding: 6px 8px;
+  border: 1px solid color-mix(in srgb, var(--yellow) 40%, var(--border));
+  border-radius: var(--radius);
+}
+.rf-fn-stale .oi {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+}
+.rf-fn-editor-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.rf-fn-label {
+  font-size: 11px;
+  color: var(--dim);
+}
+.rf-fn-input {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  padding: 6px 8px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.rf-fn-input:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--focus-ring);
+  border-color: var(--accent);
+}
+.rf-fn-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.rf-fn-status {
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--dim);
+  word-break: break-word;
+}
+.rf-fn-status.ok {
+  color: var(--green);
+}
+.rf-fn-status.err {
+  color: var(--red);
+}
+/* Response block: header (label + pretty/raw + copy) over the body. */
+.rf-fn-resp {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.rf-fn-resp-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.rf-fn-resp-label {
+  font-size: 11px;
+  color: var(--dim);
+}
+.rf-fn-response {
+  margin: 0;
+  max-height: 240px;
+  overflow: auto;
+  padding: 8px 10px;
+  background: var(--console-bg);
+  color: var(--console-fg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+/* "Selected function hidden by filter" placeholder. */
+.rf-fn-hidden {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--dim);
+}
+.rf-fn-hidden p {
+  margin: 0;
+}
+.rf-fn-hidden code {
+  font-family: var(--mono);
+  color: var(--text);
+}
+/* Narrow panel: collapse the 2-pane to a compact picker (search filters it)
+   stacked above the detail, so nothing is clipped when docked narrow. */
+@media (max-width: 560px) {
+  .rf-fn-2pane {
+    grid-template-columns: 1fr;
+  }
+  .rf-fn-list {
+    max-height: 180px;
+  }
 }
 .rf-switch-wrap {
   position: relative;

@@ -208,6 +208,18 @@ async function handleApi(
         .deployRayfinWorkspace(body.workspace)
         .catch((e) => controller.log(String(e), "error"));
       return sendJson(res, 202, { started: true });
+    case "POST /api/rayfin/functions/invoke":
+      return sendJson(
+        res,
+        200,
+        await controller.invokeRayfinFunction(body.name, body.input, body.baseUrl),
+      );
+    case "POST /api/rayfin/functions/host/status":
+      return sendJson(res, 200, await controller.getFunctionsHostStatus(body.baseUrl));
+    case "POST /api/rayfin/functions/host/start":
+      return sendJson(res, 200, await controller.startFunctionsHost());
+    case "POST /api/rayfin/functions/host/stop":
+      return sendJson(res, 200, await controller.stopFunctionsHost());
     case "POST /api/rayfin/start":
       return sendJson(res, 200, await controller.startRayfinProject({ requireNoProject: true }));
     case "POST /api/rayfin/update/check":

@@ -91,6 +91,7 @@ const session = await joinSession({
           controller.stopTsServer();
           controller.stopTestWatch().catch(() => {});
           controller.stopDev().catch(() => {});
+          controller.stopFunctionsHost().catch(() => {});
         }
       },
     }),

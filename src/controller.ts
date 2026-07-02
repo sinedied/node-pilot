@@ -46,6 +46,11 @@ import {
   rayfinLoginStatusArgv,
   hasLocalRayfinBin,
   interpretLoginStatus,
+  resolveFunctionInvokeUrl,
+  resolveFunctionPathSegment,
+  resolveFunctionsHostOrigin,
+  rayfinDevFunctionsArgv,
+  hasFuncBin,
 } from "./rayfin.ts";
 import {
   checkRayfinUpdate,
@@ -65,6 +70,8 @@ import type {
   DevState,
   Diagnostic,
   FixContextEntry,
+  FunctionsHostState,
+  FunctionsHostStatus,
   LaneState,
   LintState,
   ProcessHandle,
@@ -110,6 +117,11 @@ const TS_WATCH_EXT = new Set([
   ".astro",
 ]);
 const TS_IDLE_MS = 10 * 60 * 1000;
+
+// Default local Azure Functions host base URL for the Rayfin function invoker.
+const DEFAULT_FN_BASE_URL = "http://127.0.0.1:7071/api";
+// Console lane the managed local functions host (`rayfin dev functions apply`) streams to.
+const FN_HOST_LANE = "rayfin:dev:functions";
 
 export interface ControllerOptions {
   sendToChat?: (prompt: string) => Promise<void> | void;
@@ -172,6 +184,7 @@ export class Controller {
   lanes: Record<string, LaneState>;
   test: { report: TestReport | null; watch: boolean };
   dev: DevState;
+  fnHost: FunctionsHostState;
   deps: DepsState;
   debug: DebugSession;
   fixContext: Record<string, FixContextEntry>;
@@ -263,6 +276,7 @@ export class Controller {
     this.lanes.update = this.freshLane("update");
     this.test = { report: null, watch: false };
     this.dev = { status: "stopped", url: null, port: null, output: [], pid: null, _handle: null };
+    this.fnHost = this.freshFnHost();
     this.deps = { outdated: null, audit: null, update: null };
     // Agent-facing debugger (CDP over Node's inspector). Events flow through
     // this controller's broadcast()/log() like every other subsystem.
@@ -301,6 +315,17 @@ export class Controller {
       warningCount: 0,
       lastUpdated: null,
       reason: null,
+    };
+  }
+
+  freshFnHost(): FunctionsHostState {
+    return {
+      status: "stopped",
+      pid: null,
+      reachable: null,
+      funcAvailable: false,
+      baseUrl: null,
+      _handle: null,
     };
   }
 
@@ -378,6 +403,7 @@ export class Controller {
       // project and reset transient state before re-anchoring (mirrors the
       // discipline in setActiveProject so nothing leaks across roots).
       await this.stopDev().catch(() => {});
+      await this.stopFunctionsHost().catch(() => {});
       await this.stopTestWatch().catch(() => {});
       this.stopTsServer();
       await this.debugStop().catch(() => {});
@@ -454,6 +480,7 @@ export class Controller {
     const run = (async () => {
       // Stop everything bound to the previous project's directory.
       await this.stopDev().catch(() => {});
+      await this.stopFunctionsHost().catch(() => {});
       await this.stopTestWatch().catch(() => {});
       this.stopTsServer();
       await this.debugStop().catch(() => {});
@@ -491,6 +518,7 @@ export class Controller {
     this.lanes.update = this.freshLane("update");
     this.test = { report: null, watch: false };
     this.dev = { status: "stopped", url: null, port: null, output: [], pid: null, _handle: null };
+    this.fnHost = this.freshFnHost();
     this.deps = { outdated: null, audit: null, update: null };
     this.fixContext = {};
     this.tsLs = this.freshTsLs();
@@ -590,6 +618,7 @@ export class Controller {
       ),
       test: this.test,
       dev: { ...this.dev, output: this.dev.output.join(""), _handle: undefined },
+      fnHost: { ...this.fnHost, _handle: undefined },
       deps: this.deps,
       debug: this.debug.serialize(),
       tsLs: this.tsLs,
@@ -1081,6 +1110,129 @@ export class Controller {
     this.dev._handle = null;
     this.broadcast({ type: "dev:exit", exitCode: null });
     return { ok: true };
+  }
+
+  // ---- Rayfin local functions host ----------------------------------------
+  // Managed persistent process (`rayfin dev functions apply` → Azure Functions
+  // Core Tools `func start`) — the local host the Rayfin function invoker targets.
+  // Modeled on the dev server: long-lived, streamed to a Console lane, torn down
+  // on project switch / extension close. Gated by `func` + local-`rayfin`
+  // preflights so it never trips the CLI's interactive Core-Tools-install consent
+  // prompt (which would hang a non-interactive lane).
+
+  serializeFnHost(): FunctionsHostStatus {
+    return { ...this.fnHost, _handle: undefined };
+  }
+
+  async startFunctionsHost(): Promise<{ ok: boolean; reason?: string }> {
+    const d = this.detection;
+    if (!d?.hasProject || !d.rayfin) return { ok: false, reason: "Not a Rayfin project." };
+    if (this.fnHost.status === "running")
+      return { ok: false, reason: "Functions host already running." };
+    if (!hasLocalRayfinBin(this.cwd))
+      return { ok: false, reason: "The local rayfin CLI isn't installed." };
+    if (!hasFuncBin(this.cwd)) {
+      this.fnHost.funcAvailable = false;
+      return {
+        ok: false,
+        reason:
+          "Azure Functions Core Tools (func) isn't installed — install it to run the local functions host.",
+      };
+    }
+    const laneId = FN_HOST_LANE;
+    const label = "rayfin dev functions apply";
+    this.lanes[laneId] = this.freshLane(laneId);
+    const lane = this.lanes[laneId];
+    lane.status = "running";
+    lane.label = label;
+    lane.output = [];
+    lane.startedAt = Date.now();
+    lane.endedAt = null;
+    this.broadcast({ type: "lane:start", lane: laneId, label });
+
+    const handle = start(rayfinDevFunctionsArgv(d.pm), {
+      cwd: this.cwd,
+      onData: (chunk) => {
+        pushCapped(lane.output, chunk);
+        this.broadcast({ type: "lane:data", lane: laneId, chunk });
+      },
+    });
+    this.fnHost.status = "running";
+    this.fnHost.funcAvailable = true;
+    this.fnHost.pid = handle.child.pid ?? null;
+    this.fnHost._handle = handle;
+    handle.child.on("close", (code) => {
+      lane.exitCode = code;
+      lane.endedAt = Date.now();
+      lane.status = code === 0 || code === null ? "passed" : "failed";
+      this.broadcast({ type: "lane:end", lane: laneId, exitCode: code, status: lane.status });
+      // Only clear host state if *this* process is still the active one — a since-
+      // superseded host (project switch, or a stop→start race) must not reset the
+      // newer handle/pid.
+      if (this.fnHost._handle !== handle) return;
+      this.fnHost.status = "stopped";
+      this.fnHost.pid = null;
+      this.fnHost._handle = null;
+      this.broadcast({ type: "rayfin:fnhost", fnHost: this.serializeFnHost() });
+    });
+    this.broadcast({ type: "rayfin:fnhost", fnHost: this.serializeFnHost() });
+    return { ok: true };
+  }
+
+  async stopFunctionsHost(): Promise<{ ok: boolean; reason?: string }> {
+    const handle = this.fnHost._handle;
+    if (this.fnHost.status !== "running" || !handle)
+      return { ok: false, reason: "Functions host is not running." };
+    await handle.stop();
+    // Guard against a concurrent switch/start having already repointed fnHost to a
+    // different process while stop() awaited.
+    if (this.fnHost._handle === handle) {
+      this.fnHost.status = "stopped";
+      this.fnHost.pid = null;
+      this.fnHost._handle = null;
+      this.broadcast({ type: "rayfin:fnhost", fnHost: this.serializeFnHost() });
+    }
+    return { ok: true };
+  }
+
+  // Passive, timeout-bounded reachability probe of the configured base URL's
+  // localhost origin. Any HTTP response (even a 404) => reachable; a thrown
+  // connection error => unreachable; a non-localhost / invalid base => unknown
+  // (null). Never follows redirects, never throws.
+  async probeFunctionsHost(baseUrl?: unknown): Promise<boolean | null> {
+    const base =
+      typeof baseUrl === "string" && baseUrl.trim() ? baseUrl.trim() : DEFAULT_FN_BASE_URL;
+    const origin = resolveFunctionsHostOrigin(base);
+    if (!origin) return null;
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 2000);
+    try {
+      await this._fetchImpl(origin, { method: "GET", redirect: "manual", signal: ctl.signal });
+      return true;
+    } catch {
+      return false;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  // Refresh + return the serialized host status (reachability + `func`/CLI
+  // availability for the current base URL). Broadcasts `rayfin:fnhost`. Guarded by
+  // `_projectGen`/cwd so a slow probe from a since-switched project can't publish.
+  async getFunctionsHostStatus(baseUrl?: unknown): Promise<FunctionsHostStatus> {
+    const gen = this._projectGen;
+    const cwd = this.cwd;
+    const base =
+      typeof baseUrl === "string" && baseUrl.trim() ? baseUrl.trim() : DEFAULT_FN_BASE_URL;
+    const funcAvailable = hasFuncBin(this.cwd) && hasLocalRayfinBin(this.cwd);
+    const reachable = await this.probeFunctionsHost(base);
+    if (this._projectGen !== gen || this.cwd !== cwd) return this.serializeFnHost();
+    this.fnHost.reachable = reachable;
+    this.fnHost.funcAvailable = funcAvailable;
+    this.fnHost.baseUrl = base;
+    const out = this.serializeFnHost();
+    this.broadcast({ type: "rayfin:fnhost", fnHost: out });
+    return out;
   }
 
   // ---- Debugger (CDP) -----------------------------------------------------
@@ -1884,6 +2036,100 @@ export class Controller {
       value ? `rayfin up (${value})` : "rayfin up",
       rayfinArgv(d.pm, argv),
     );
+  }
+
+  // Invoke a backend function against the **local** dev backend (the Azure
+  // Functions host, default 127.0.0.1:7071/api). Server-side POST so the WebKit
+  // webview isn't blocked by CORS / mixed-content, and so the localhost guard in
+  // `resolveFunctionInvokeUrl` is enforced (the endpoint is reachable from the
+  // same-origin preview proxy — it must not become an SSRF vector). The function
+  // name is validated against the current schema; deployed/auth'd invocation is
+  // out of scope. Never throws — connection errors come back as `{ ok:false }`.
+  async invokeRayfinFunction(
+    name: unknown,
+    input: unknown,
+    baseUrl: unknown,
+  ): Promise<{
+    ok: boolean;
+    status?: number;
+    body?: unknown;
+    ms?: number;
+    error?: string;
+    url?: string;
+    method?: string;
+  }> {
+    const d = this.detection;
+    if (!d?.hasProject || !d.rayfin) return { ok: false, error: "Not a Rayfin project." };
+    const fname = typeof name === "string" ? name : "";
+    // Capture the project identity up front: `getRayfinState()` + the network POST
+    // both await, and a concurrent project switch must not let this result land
+    // against a different project's schema.
+    const gen = this._projectGen;
+    const cwd = this.cwd;
+    const st = await this.getRayfinState();
+    if (this._projectGen !== gen || this.cwd !== cwd) {
+      return { ok: false, error: "Project changed during invoke." };
+    }
+    if (!("functions" in st)) return { ok: false, error: "No Rayfin schema." };
+    // The invokable set is recomputed server-side as schema functions ∪ orphan
+    // handlers — never trust the webview-posted name. Orphans (an `app.http`
+    // registration with no matching schema entry) are still real endpoints.
+    const invokable = new Set<string>([...st.functions.map((f) => f.name), ...st.orphanHandlers]);
+    if (!invokable.has(fname)) return { ok: false, error: `Unknown function "${fname}".` };
+    // Route lookup from the parsed handlers (single source of truth). A custom
+    // static route overrides the default `/api/<name>` segment; dynamic/param
+    // routes fall back to the name (the UI labels those "verify").
+    const handler = st.handlers.find((h) => h.name === fname) ?? null;
+    const route = handler && !handler.routeDynamic ? handler.route : null;
+    const base =
+      typeof baseUrl === "string" && baseUrl.trim() ? baseUrl.trim() : DEFAULT_FN_BASE_URL;
+    const url = resolveFunctionInvokeUrl(base, fname, route);
+    if (!url) return { ok: false, error: "Base URL must be a localhost http(s) URL." };
+    const method = "POST";
+    const started = Date.now();
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 15_000);
+    try {
+      const res = await this._fetchImpl(url, {
+        method,
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(input ?? {}),
+        signal: ctl.signal,
+        // Never follow redirects: an allowed localhost host that 30x-redirects
+        // could otherwise bounce the POST to a non-local URL, defeating the
+        // localhost guard in `resolveFunctionInvokeUrl`.
+        redirect: "manual",
+      });
+      const ms = Date.now() - started;
+      if (res.type === "opaqueredirect" || (res.status >= 300 && res.status < 400)) {
+        return {
+          ok: false,
+          status: res.status || undefined,
+          ms,
+          url,
+          method,
+          error: "Function host returned a redirect — refusing to follow it.",
+        };
+      }
+      const text = await res.text();
+      let bodyOut: unknown = text;
+      try {
+        bodyOut = text ? JSON.parse(text) : "";
+      } catch {
+        // Non-JSON response: keep the raw text.
+      }
+      return { ok: res.ok, status: res.status, body: bodyOut, ms, url, method };
+    } catch (e) {
+      const ms = Date.now() - started;
+      const err = e as { name?: string; message?: string };
+      const error =
+        err?.name === "AbortError"
+          ? "Request timed out — is the functions host running?"
+          : `${err?.message || err || "Request failed"} (is the functions host running?)`;
+      return { ok: false, ms, url, method, error };
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   // Check whether a newer Rayfin release is published (npm registry). Throttled

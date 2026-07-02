@@ -6,18 +6,24 @@ import { mkdtemp, writeFile, mkdir, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import {
+  hasFuncBin,
   hasLocalRayfinBin,
   hasRayfinAgentFiles,
   interpretLoginStatus,
   mergeEntities,
+  parseFunctionHandlers,
   parseFunctionsSchema,
   parseSchema,
   parseSchemaRegistration,
   parseYml,
+  rayfinDevFunctionsArgv,
   rayfinLoginStatusArgv,
   readInstalledRayfinVersion,
   readRayfinState,
   rayfinWorkspaceFlag,
+  resolveFunctionInvokeUrl,
+  resolveFunctionPathSegment,
+  resolveFunctionsHostOrigin,
 } from "../src/rayfin.ts";
 
 describe("rayfinWorkspaceFlag", () => {
@@ -340,14 +346,29 @@ describe("parseSchemaRegistration", () => {
 });
 
 describe("parseFunctionsSchema", () => {
-  it("extracts top-level function names from a `FunctionsSchema` type", () => {
+  it("extracts the full contract (name, input, output, params) of each function", () => {
     const src = `import type { FunctionsSchema } from '@microsoft/rayfin-functions';
       export type AppFunctionsSchema = {
-        helloWorld: { input: { name: string }; output: string };
+        helloWorld: { input: { firstName: string; lastName?: string }; output: string };
         add: { input: { a: number; b: number }; output: number };
         summarize: { input: { text: string; maxWords?: number }; output: { summary: string } };
       } satisfies FunctionsSchema;`;
-    expect(parseFunctionsSchema(src)).toEqual(["helloWorld", "add", "summarize"]);
+    const fns = parseFunctionsSchema(src);
+    expect(fns.map((f) => f.name)).toEqual(["helloWorld", "add", "summarize"]);
+    expect(fns[0]).toEqual({
+      name: "helloWorld",
+      input: "{ firstName: string; lastName?: string }",
+      output: "string",
+      params: [
+        { name: "firstName", type: "string", optional: false },
+        { name: "lastName", type: "string", optional: true },
+      ],
+    });
+    expect(fns[2].output).toBe("{ summary: string }");
+    expect(fns[2].params).toEqual([
+      { name: "text", type: "string", optional: false },
+      { name: "maxWords", type: "number", optional: true },
+    ]);
   });
 
   it("walks nested braces without stopping at the first inner `}`", () => {
@@ -355,7 +376,19 @@ describe("parseFunctionsSchema", () => {
       a: { input: { deep: { x: 1 } }; output: void };
       b: { input: Record<string, unknown>; output: string };
     };`;
-    expect(parseFunctionsSchema(src)).toEqual(["a", "b"]);
+    const fns = parseFunctionsSchema(src);
+    expect(fns.map((f) => f.name)).toEqual(["a", "b"]);
+    // `Record<string, unknown>` is not an object literal → no named params.
+    expect(fns[1].params).toEqual([]);
+    expect(fns[1].input).toBe("Record<string, unknown>");
+  });
+
+  it("treats a void / non-object input as having no params", () => {
+    const src = `type FnSchema = {
+      ping: { input: void; output: string };
+    };`;
+    const fns = parseFunctionsSchema(src);
+    expect(fns[0]).toEqual({ name: "ping", input: "void", output: "string", params: [] });
   });
 
   it("ignores comments and returns [] when no schema is present", () => {
@@ -367,7 +400,178 @@ describe("parseFunctionsSchema", () => {
       export type AppFunctionsSchema = {
         realFn: { input: { x: number }; output: number };
       } satisfies FunctionsSchema;`;
-    expect(parseFunctionsSchema(src)).toEqual(["realFn"]);
+    expect(parseFunctionsSchema(src).map((f) => f.name)).toEqual(["realFn"]);
+  });
+});
+
+describe("resolveFunctionInvokeUrl", () => {
+  it("builds the POST URL for a localhost base URL", () => {
+    expect(resolveFunctionInvokeUrl("http://127.0.0.1:7071/api", "add")).toBe(
+      "http://127.0.0.1:7071/api/add",
+    );
+    expect(resolveFunctionInvokeUrl("http://localhost:7071/api/", "helloWorld")).toBe(
+      "http://localhost:7071/api/helloWorld",
+    );
+  });
+
+  it("rejects non-local hosts (no SSRF via the same-origin preview proxy)", () => {
+    expect(resolveFunctionInvokeUrl("http://evil.example.com/api", "add")).toBeNull();
+    expect(resolveFunctionInvokeUrl("http://169.254.169.254/latest", "add")).toBeNull();
+  });
+
+  it("rejects non-http protocols and non-identifier function names", () => {
+    expect(resolveFunctionInvokeUrl("file:///etc/passwd", "add")).toBeNull();
+    expect(resolveFunctionInvokeUrl("http://127.0.0.1:7071/api", "../secret")).toBeNull();
+    expect(resolveFunctionInvokeUrl("http://127.0.0.1:7071/api", "a b")).toBeNull();
+    expect(resolveFunctionInvokeUrl("not a url", "add")).toBeNull();
+  });
+
+  it("rejects userinfo, query, and fragment (no request shaping)", () => {
+    expect(resolveFunctionInvokeUrl("http://user:pass@127.0.0.1:7071/api", "add")).toBeNull();
+    expect(resolveFunctionInvokeUrl("http://127.0.0.1:7071/api?x=1", "add")).toBeNull();
+    expect(resolveFunctionInvokeUrl("http://127.0.0.1:7071/api#frag", "add")).toBeNull();
+  });
+
+  it("rejects deep base paths (no arbitrary local path probing)", () => {
+    expect(resolveFunctionInvokeUrl("http://127.0.0.1:7071/a/b/c", "add")).toBeNull();
+    expect(resolveFunctionInvokeUrl("http://127.0.0.1:5432/latest/meta-data", "add")).toBeNull();
+    // A shallow route-prefix path is still allowed.
+    expect(resolveFunctionInvokeUrl("http://127.0.0.1:7071/", "add")).toBe(
+      "http://127.0.0.1:7071/add",
+    );
+  });
+
+  it("uses a static custom route as the path segment when supplied", () => {
+    expect(resolveFunctionInvokeUrl("http://127.0.0.1:7071/api", "getUser", "users/list")).toBe(
+      "http://127.0.0.1:7071/api/users/list",
+    );
+  });
+
+  it("falls back to the function name for unsafe/param routes", () => {
+    expect(resolveFunctionInvokeUrl("http://127.0.0.1:7071/api", "getUser", "users/{id}")).toBe(
+      "http://127.0.0.1:7071/api/getUser",
+    );
+    expect(resolveFunctionInvokeUrl("http://127.0.0.1:7071/api", "getUser", "../secret")).toBe(
+      "http://127.0.0.1:7071/api/getUser",
+    );
+  });
+});
+
+describe("parseFunctionHandlers", () => {
+  it("parses app.http registrations (name only → defaults)", () => {
+    const h = parseFunctionHandlers(
+      `import { app } from "@azure/functions";
+       app.http("helloWorld", { handler: async () => ({ body: "hi" }) });`,
+    );
+    expect(h).toEqual([{ name: "helloWorld", route: null, routeDynamic: false, methods: null }]);
+  });
+
+  it("captures a static route and explicit methods", () => {
+    const h = parseFunctionHandlers(
+      `app.http("getUser", { methods: ["GET", "POST"], route: "users/list", handler: h1 });`,
+    );
+    expect(h).toEqual([
+      { name: "getUser", route: "users/list", routeDynamic: false, methods: ["GET", "POST"] },
+    ]);
+  });
+
+  it("marks a non-literal (param/dynamic) route as routeDynamic", () => {
+    const h = parseFunctionHandlers("app.http('getUser', { route: `users/${id}`, handler: h });");
+    expect(h[0]).toMatchObject({ name: "getUser", route: null, routeDynamic: true });
+  });
+
+  it("marks a static route carrying route params/wildcards as routeDynamic", () => {
+    const h = parseFunctionHandlers(`app.http("getUser", { route: "users/{id}", handler: h });`);
+    expect(h[0]).toMatchObject({ name: "getUser", route: null, routeDynamic: true });
+    const w = parseFunctionHandlers(`app.http("files", { route: "files/{*path}", handler: h });`);
+    expect(w[0]).toMatchObject({ name: "files", route: null, routeDynamic: true });
+  });
+
+  it("dedupes repeated names and ignores commented-out registrations", () => {
+    const h = parseFunctionHandlers(
+      `app.http("a", { handler: x });
+       // app.http("commented", { handler: y });
+       app.http("a", { handler: z });
+       app.http("b", { handler: w });`,
+    );
+    expect(h.map((x) => x.name)).toEqual(["a", "b"]);
+  });
+});
+
+describe("resolveFunctionPathSegment", () => {
+  it("prefers a safe static route, else the function name", () => {
+    expect(resolveFunctionPathSegment("getUser", "users/list")).toBe("users/list");
+    expect(resolveFunctionPathSegment("getUser", null)).toBe("getUser");
+    expect(resolveFunctionPathSegment("getUser", "/leading/")).toBe("leading");
+  });
+
+  it("falls back to the name for traversal or unexpected characters", () => {
+    expect(resolveFunctionPathSegment("getUser", "../x")).toBe("getUser");
+    expect(resolveFunctionPathSegment("getUser", "a b")).toBe("getUser");
+  });
+});
+
+describe("resolveFunctionsHostOrigin", () => {
+  it("returns the localhost origin", () => {
+    expect(resolveFunctionsHostOrigin("http://127.0.0.1:7071/api")).toBe("http://127.0.0.1:7071");
+    expect(resolveFunctionsHostOrigin("http://localhost:7071/api/")).toBe("http://localhost:7071");
+  });
+
+  it("rejects non-local or non-http URLs", () => {
+    expect(resolveFunctionsHostOrigin("http://evil.example.com/api")).toBeNull();
+    expect(resolveFunctionsHostOrigin("file:///tmp")).toBeNull();
+    expect(resolveFunctionsHostOrigin("not a url")).toBeNull();
+  });
+
+  it("rejects deep base paths", () => {
+    expect(resolveFunctionsHostOrigin("http://127.0.0.1:7071/a/b")).toBeNull();
+  });
+});
+
+describe("rayfinDevFunctionsArgv", () => {
+  it("builds `rayfin -y dev functions apply` via the detected package manager", () => {
+    expect(rayfinDevFunctionsArgv("npm")).toEqual([
+      "npm",
+      "exec",
+      "--",
+      "rayfin",
+      "-y",
+      "dev",
+      "functions",
+      "apply",
+    ]);
+    expect(rayfinDevFunctionsArgv("pnpm")).toEqual([
+      "pnpm",
+      "exec",
+      "rayfin",
+      "-y",
+      "dev",
+      "functions",
+      "apply",
+    ]);
+  });
+});
+
+describe("hasFuncBin", () => {
+  const dirs: string[] = [];
+  afterEach(async () => {
+    for (const d of dirs.splice(0)) await rm(d, { recursive: true, force: true });
+  });
+
+  it("returns false when func is absent from PATH and node_modules", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "np-func-"));
+    dirs.push(dir);
+    expect(hasFuncBin(dir, { PATH: "" })).toBe(false);
+  });
+
+  it("finds func on PATH", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "np-func-"));
+    dirs.push(dir);
+    const bin = path.join(dir, "bin");
+    await mkdir(bin, { recursive: true });
+    const name = process.platform === "win32" ? "func.exe" : "func";
+    await writeFile(path.join(bin, name), "");
+    expect(hasFuncBin(dir, { PATH: bin })).toBe(true);
   });
 });
 
@@ -403,8 +607,45 @@ services:
     const state = await readRayfinState(dir);
     expect("functions" in state).toBe(true);
     if (!("functions" in state)) return;
-    expect(state.functions).toEqual(["helloWorld", "add"]);
+    expect(state.functions.map((f) => f.name)).toEqual(["helloWorld", "add"]);
     expect(state.config?.functionsEnabled).toBe(true);
+  });
+
+  it("cross-checks the schema against app.http() handlers (hasHandler + orphanHandlers)", async () => {
+    dir = await mkdtemp(path.join(os.tmpdir(), "np-rayfin-"));
+    const rf = path.join(dir, "rayfin");
+    await mkdir(path.join(rf, "functions", "src"), { recursive: true });
+    await writeFile(
+      path.join(rf, "rayfin.yml"),
+      `name: Fn App
+version: 1.0.0
+services:
+  functions:
+    enabled: true
+`,
+    );
+    await writeFile(
+      path.join(rf, "functions", "src", "types.ts"),
+      `import type { FunctionsSchema } from '@microsoft/rayfin-functions';
+       export type AppFunctionsSchema = {
+         helloWorld: { input: { name: string }; output: string };
+         add: { input: { a: number; b: number }; output: number };
+       } satisfies FunctionsSchema;`,
+    );
+    // `helloWorld` has a handler; `add` doesn't; `strayFn` is a handler with no
+    // schema entry (an orphan).
+    await writeFile(
+      path.join(rf, "functions", "src", "handlers.ts"),
+      `app.http('helloWorld', { methods: ['POST'], handler: hw });
+       app.http("strayFn", { methods: ['POST'], handler: stray });`,
+    );
+
+    const state = await readRayfinState(dir);
+    expect("functions" in state).toBe(true);
+    if (!("functions" in state)) return;
+    const byName = Object.fromEntries(state.functions.map((f) => [f.name, f.hasHandler]));
+    expect(byName).toEqual({ helloWorld: true, add: false });
+    expect(state.orphanHandlers).toEqual(["strayFn"]);
   });
 
   it("reports no functions when the directory is absent (section stays gated off)", async () => {
@@ -465,7 +706,7 @@ services:
     const state = await readRayfinState(dir);
     expect("functions" in state).toBe(true);
     if (!("functions" in state)) return;
-    expect(state.functions).toEqual(["hello", "world"]);
+    expect(state.functions.map((f) => f.name)).toEqual(["hello", "world"]);
   });
 });
 
